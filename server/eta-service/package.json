@@ -1,0 +1,18 @@
+{
+  "name": "trotroos-eta-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Caching ETA service for TrotroOS. 60s TTL in front of Google Routes / OSRM so the mobile client never calls routing APIs directly.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "morgan": "^1.10.0"
+  }
+}

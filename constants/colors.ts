@@ -1,0 +1,15 @@
+export const TrotroColors = {
+  primary: '#E67E22',
+  primaryDark: '#D97706',
+  secondary: '#059669',
+  accent: '#DC2626',
+  surface: '#FFFFFF',
+  surfaceDark: '#1F2937',
+  text: '#111827',
+  textMuted: '#6B7280',
+  border: '#E5E7EB',
+  tabBarBg: '#1a1a1a',
+  tabActive: '#E67E22',
+  tabInactive: '#888888',
+  mapRoute: '#2563EB',
+} as const;

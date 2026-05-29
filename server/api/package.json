@@ -1,0 +1,19 @@
+{
+  "name": "trotroos-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Authoritative API for TrotroOS: fares, wallet ledger, Paystack payments/webhooks. Never trust client-side amounts.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0"
+  }
+}
