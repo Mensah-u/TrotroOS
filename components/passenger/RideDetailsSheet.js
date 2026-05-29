@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PremiumButton from '@/components/PremiumButton';
 import { PASSENGER } from '@/constants/problemSolution';
 import { Theme, glowShadow } from '@/constants/theme';
+import { getVehicleIcon } from '@/constants/vehicleTypes';
 import { estimateTripDuration, formatDistance } from '@/utils/rideEta';
 
 function haversineKm(from, to) {
@@ -142,7 +143,10 @@ export default function RideDetailsSheet({
                     <Text style={styles.ratingCount}>New on TrotroOS</Text>
                   )}
                   {trip.vehicleType ? (
-                    <Text style={styles.vehicleType}>{trip.vehicleType}</Text>
+                    <View style={styles.vehicleTypeRow}>
+                      <Ionicons name={getVehicleIcon(trip.vehicleType)} size={14} color={Theme.colors.textSub} />
+                      <Text style={styles.vehicleType}>{trip.vehicleType}</Text>
+                    </View>
                   ) : null}
                 </View>
                 {trip.plate ? (
@@ -170,7 +174,7 @@ export default function RideDetailsSheet({
                   valueColor={Theme.colors.passenger}
                 />
                 <DetailRow
-                  icon="bus-outline"
+                  icon={getVehicleIcon(trip.vehicleType)}
                   label="Trip time"
                   value={`${tripDuration.label} from ${trip.originStation} to ${trip.destination}`}
                 />
@@ -318,7 +322,8 @@ const styles = StyleSheet.create({
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   ratingText: { color: '#FBBF24', fontSize: 14, fontWeight: '800' },
   ratingCount: { color: Theme.colors.textMuted, fontSize: 12, fontWeight: '600', marginTop: 2 },
-  vehicleType: { color: Theme.colors.textSub, fontSize: 13, marginTop: 2 },
+  vehicleType: { color: Theme.colors.textSub, fontSize: 13 },
+  vehicleTypeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
   plateBox: {
     backgroundColor: Theme.colors.bg,
     borderRadius: 10,

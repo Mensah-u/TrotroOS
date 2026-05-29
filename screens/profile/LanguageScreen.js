@@ -8,8 +8,10 @@ import ProfileHeader from '@/components/ProfileHeader';
 import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { Theme } from '@/constants/theme';
 import { LANGUAGES, getAppPreferences, saveAppPreferences } from '@/services/appPreferences';
+import { useI18n } from '@/context/I18nContext';
 
 export default function LanguageScreen({ navigation }) {
+  const { setLang: setI18nLang } = useI18n();
   const [language, setLanguage] = useState('en');
   const [haptics, setHaptics] = useState(true);
   const [dataSaver, setDataSaver] = useState(false);
@@ -27,6 +29,7 @@ export default function LanguageScreen({ navigation }) {
   const choose = async (code) => {
     setLanguage(code);
     await saveAppPreferences({ language: code });
+    await setI18nLang(code);
   };
 
   return (
@@ -34,7 +37,7 @@ export default function LanguageScreen({ navigation }) {
       <ProfileHeader navigation={navigation} title="Language & App" />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.intro}>
-          Pick your preferred greeting and adjust app behavior. Full translation of the app is coming soon.
+          English and Twi cover core screens (Find Ride, waiting, sharing). More languages coming soon.
         </Text>
 
         <Text style={styles.sectionLabel}>APP LANGUAGE</Text>
@@ -76,7 +79,7 @@ export default function LanguageScreen({ navigation }) {
             <Switch
               value={haptics}
               onValueChange={(v) => { setHaptics(v); saveAppPreferences({ haptics: v }); }}
-              trackColor={{ false: '#333', true: 'rgba(59,130,246,0.5)' }}
+              trackColor={{ false: '#333', true: 'rgba(243,111,33,0.5)' }}
               thumbColor={haptics ? Theme.colors.passenger : '#888'}
             />
           </View>
@@ -92,7 +95,7 @@ export default function LanguageScreen({ navigation }) {
             <Switch
               value={dataSaver}
               onValueChange={(v) => { setDataSaver(v); saveAppPreferences({ dataSaver: v }); }}
-              trackColor={{ false: '#333', true: 'rgba(59,130,246,0.5)' }}
+              trackColor={{ false: '#333', true: 'rgba(243,111,33,0.5)' }}
               thumbColor={dataSaver ? Theme.colors.passenger : '#888'}
             />
           </View>

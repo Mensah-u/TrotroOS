@@ -16,7 +16,7 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
  * smooth on Android even with tracksViewChanges={false}.
  */
 export default function PulsingMapMarker({
-  color = '#2563EB',
+  color = '#F36F21',
   size = 38,
   icon,
   iconColor = '#FFFFFF',

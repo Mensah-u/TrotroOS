@@ -2,7 +2,7 @@
   "expo": {
     "name": "TrotroOS",
     "slug": "TrotroOSv2",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "trotrops",
@@ -13,9 +13,9 @@
     },
     "android": {
       "package": "com.trotro.os",
-      "versionCode": 7,
+      "versionCode": 8,
       "adaptiveIcon": {
-        "backgroundColor": "#0C0C0C",
+        "backgroundColor": "#121212",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -44,9 +44,9 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#0C0C0C",
+          "backgroundColor": "#121212",
           "dark": {
-            "backgroundColor": "#0C0C0C"
+            "backgroundColor": "#121212"
           }
         }
       ],
@@ -56,6 +56,13 @@
           "locationWhenInUsePermission": "TrotroOS uses your location only while the app is open, so mates can see where to pick you up and you can see nearby vehicles in real time.",
           "isAndroidBackgroundLocationEnabled": false,
           "isIosBackgroundLocationEnabled": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#F36F21"
         }
       ]
     ],

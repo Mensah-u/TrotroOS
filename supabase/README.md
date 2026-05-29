@@ -10,6 +10,8 @@ Alternatively run `migrations/000_trotroos_complete_schema.sql` then `006_reserv
 
 **Mate can't start a trip / "permission denied"?** Run the **entire** **`FIX_mate_depart_now.sql`** in SQL Editor (grants, RLS, `create_mate_trip` RPC). From project root: `.\scripts\fix-depart-now.ps1` opens the file and editor. Wait ~30s after Run, then try **Depart Now** again.
 
+**v1.4 features (verification, scheduled rides, safety reports, boarding RPC)?** Run **`FIX_v14_features.sql`** once.
+
 **Mate dashboard shows static "No queue yet" / Live sync?** Run **`FIX_live_demand.sql`** so `passenger_locations` + Realtime work. Passengers must tap **I'm waiting** on Find Ride to appear in the queue.
 
 **Want cheaper reads as the fleet grows?** Run **`FIX_nearby_indexes.sql`** once. Adds `(latitude, longitude)` B-tree indexes plus a generated `geohash5` column on `driver_locations` and `passenger_locations` so the app's 2 km bounding-box queries stay sub-millisecond. Safe to run multiple times.

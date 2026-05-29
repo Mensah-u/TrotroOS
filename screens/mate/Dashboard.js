@@ -33,6 +33,7 @@ import {
   getRouteFare,
   routes,
 } from '@/constants/routes';
+import { boardReservation } from '@/services/featuresV14';
 import { getMateEarningsTotal, recordTripEarnings } from '@/services/mateEarnings';
 import {
   getCustomRoutes,
@@ -56,6 +57,8 @@ import {
   supabase,
 } from '@/services/supabase';
 import { TAB_BAR_CLEARANCE, TAB_FOOTER_CLEARANCE } from '@/constants/layout';
+import { DEFAULT_VEHICLE_TYPE, getSeatLimitsForVehicleType } from '@/constants/vehicleTypes';
+import { getSeatStatus, Theme } from '@/constants/theme';
 import { formatSupabaseError } from '@/utils/supabaseErrors';
 import { getMyLocationLabel } from '@/utils/myLocation';
 import {
@@ -67,42 +70,38 @@ import {
 import { passengerMatchesRoute } from '@/utils/routeMatching';
 
 const C = {
-  BG:          '#0C0C0C',
-  SURFACE:     '#161616',
-  SURFACE_UP:  '#1E1E1E',
-  BORDER:      'rgba(255,255,255,0.07)',
-  ACCENT:      '#F97316',
-  ACCENT_SOFT: 'rgba(249,115,22,0.14)',
-  SUCCESS:     '#22C55E',
-  WARN:        '#EAB308',
-  DANGER:      '#EF4444',
-  TEXT:        '#F9FAFB',
-  TEXT_SUB:    '#9CA3AF',
-  TEXT_MUTED:  '#4B5563',
+  BG:          Theme.colors.bg,
+  SURFACE:     Theme.colors.surface,
+  SURFACE_UP:  Theme.colors.surfaceUp,
+  BORDER:      Theme.colors.border,
+  ACCENT:      Theme.colors.mate,
+  ACCENT_SOFT: Theme.colors.mateSoft,
+  MATE_MAP:    Theme.colors.mateMap,
+  PASSENGER_MAP: Theme.colors.passengerMap,
+  SUCCESS:     Theme.colors.success,
+  WARN:        Theme.colors.seatFilling,
+  DANGER:      Theme.colors.error,
+  TEXT:        Theme.colors.text,
+  TEXT_SUB:    Theme.colors.textSub,
+  TEXT_MUTED:  Theme.colors.textMuted,
 };
 
 const MAP_INITIAL_REGION = DEFAULT_MAP_REGION;
 
 const darkMapStyle = [
-  { elementType: 'geometry',           stylers: [{ color: '#0c0c0c' }] },
+  { elementType: 'geometry',           stylers: [{ color: '#121212' }] },
   { elementType: 'labels.text.fill',   stylers: [{ color: '#6b7280' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0c0c0c' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#121212' }] },
   { featureType: 'administrative',     elementType: 'geometry.stroke', stylers: [{ color: '#1e1e1e' }] },
   { featureType: 'poi',                elementType: 'labels',          stylers: [{ visibility: 'off' }] },
   { featureType: 'road',               elementType: 'geometry',        stylers: [{ color: '#1e1e1e' }] },
-  { featureType: 'road.highway',       elementType: 'geometry',        stylers: [{ color: '#2a2a2a' }] },
+  { featureType: 'road.highway',       elementType: 'geometry',        stylers: [{ color: '#1E1E1E' }] },
   { featureType: 'transit',            elementType: 'labels',          stylers: [{ visibility: 'off' }] },
   { featureType: 'water',              elementType: 'geometry',        stylers: [{ color: '#060606' }] },
 ];
 
-const MIN_SEATS = 1;
-const MAX_SEATS = 20;
-const DEFAULT_SEATS = 10;
-
 function getSeatColor(seats) {
-  if (seats < 2) return C.DANGER;
-  if (seats <= 5) return C.WARN;
-  return C.SUCCESS;
+  return getSeatStatus(seats).color;
 }
 
 function filterPassengersForRoute(passengers, routeLabel) {
@@ -473,9 +472,10 @@ function CustomRouteEditor({ onSave, onCancel, mateCoords }) {
   );
 }
 
-function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSyncAt, startWithCustomEditor = false, mateCoords = null }) {
+function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSyncAt, startWithCustomEditor = false, mateCoords = null, vehicleType = DEFAULT_VEHICLE_TYPE }) {
+  const seatLimits = useMemo(() => getSeatLimitsForVehicleType(vehicleType), [vehicleType]);
   const [selectedRouteId, setSelectedRouteId] = useState(defaultRouteId ?? null);
-  const [seats, setSeats] = useState(DEFAULT_SEATS);
+  const [seats, setSeats] = useState(seatLimits.default);
   const [customRoutes, setCustomRoutes] = useState([]);
   const [editingCustom, setEditingCustom] = useState(!!startWithCustomEditor);
 
@@ -497,6 +497,12 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
   useEffect(() => {
     getCustomRoutes().then(setCustomRoutes).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setSeats((current) =>
+      Math.min(seatLimits.max, Math.max(seatLimits.min, current || seatLimits.default)),
+    );
+  }, [seatLimits.min, seatLimits.max, seatLimits.default]);
 
   useEffect(() => {
     if (defaultRouteId != null && selectedRouteId == null) setSelectedRouteId(defaultRouteId);
@@ -618,12 +624,13 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
       </View>
 
       <Text style={styles.sectionLabel}>PASSENGER SEATS</Text>
+      <Text style={styles.stepperSubLabel}>{vehicleType} · default {seatLimits.default} seats</Text>
       <View style={styles.stepperCard}>
         <Pressable
           accessibilityRole="button"
-          disabled={seats <= MIN_SEATS || loading}
-          onPress={() => setSeats((s) => Math.max(MIN_SEATS, s - 1))}
-          style={({ pressed }) => [styles.stepperBtn, (seats <= MIN_SEATS || loading) && styles.stepperBtnDisabled, pressed && { opacity: 0.7 }]}>
+          disabled={seats <= seatLimits.min || loading}
+          onPress={() => setSeats((s) => Math.max(seatLimits.min, s - 1))}
+          style={({ pressed }) => [styles.stepperBtn, (seats <= seatLimits.min || loading) && styles.stepperBtnDisabled, pressed && { opacity: 0.7 }]}>
           <Ionicons name="remove" size={24} color={C.TEXT} />
         </Pressable>
         <View style={styles.stepperCenter}>
@@ -632,9 +639,9 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
         </View>
         <Pressable
           accessibilityRole="button"
-          disabled={seats >= MAX_SEATS || loading}
-          onPress={() => setSeats((s) => Math.min(MAX_SEATS, s + 1))}
-          style={({ pressed }) => [styles.stepperBtn, (seats >= MAX_SEATS || loading) && styles.stepperBtnDisabled, pressed && { opacity: 0.7 }]}>
+          disabled={seats >= seatLimits.max || loading}
+          onPress={() => setSeats((s) => Math.min(seatLimits.max, s + 1))}
+          style={({ pressed }) => [styles.stepperBtn, (seats >= seatLimits.max || loading) && styles.stepperBtnDisabled, pressed && { opacity: 0.7 }]}>
           <Ionicons name="add" size={24} color={C.TEXT} />
         </Pressable>
       </View>
@@ -701,12 +708,14 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
 function ActiveView({
   trip,
   onOnboard,
+  onBoardReservation,
   onTripFull,
   onEndTrip,
   onOpenEarn,
   onUpdateDestination,
   reservationBannerKey,
   reservationCount,
+  tripReservations,
   mateCoords,
   passengerLocations,
   lastSyncAt,
@@ -1069,7 +1078,7 @@ function ActiveView({
                 tracksViewChanges
                 zIndex={2}>
                 <PulsingMapMarker
-                  color="#2563EB"
+                  color={C.MATE_MAP}
                   size={44}
                   icon="bus"
                   label="YOU · LIVE"
@@ -1089,7 +1098,7 @@ function ActiveView({
                     onPress={() => onPassengerClusterPress(c)}>
                     <MapClusterMarker
                       count={c.count}
-                      color={reservedCount > 0 ? C.ACCENT : C.SUCCESS}
+                      color={reservedCount > 0 ? C.ACCENT : C.PASSENGER_MAP}
                     />
                   </SafeMarker>
                 );
@@ -1103,7 +1112,7 @@ function ActiveView({
                   anchor={{ x: 0.5, y: 0.5 }}
                   tracksViewChanges>
                   <PulsingMapMarker
-                    color={p.reservation_id ? C.ACCENT : C.SUCCESS}
+                    color={p.reservation_id ? C.ACCENT : C.PASSENGER_MAP}
                     size={32}
                     icon={p.reservation_id ? 'bookmark' : 'person'}
                     ringOpacity={p.reservation_id ? 0.55 : 0.4}
@@ -1130,14 +1139,18 @@ function ActiveView({
 
           <View style={styles.mapLegend} pointerEvents="none">
             <View style={styles.mapLegendRow}>
-              <View style={[styles.mapLegendDot, { backgroundColor: '#22C55E' }]} />
+              <View style={[styles.mapLegendDot, { backgroundColor: C.SUCCESS }]} />
               <Text style={styles.mapLegendText} numberOfLines={1}>
                 {trip.route?.origin ?? 'Pickup'}
               </Text>
             </View>
             <View style={styles.mapLegendRow}>
-              <View style={[styles.mapLegendDot, { backgroundColor: '#2563EB' }]} />
+              <View style={[styles.mapLegendDot, { backgroundColor: C.MATE_MAP }]} />
               <Text style={styles.mapLegendText}>You</Text>
+            </View>
+            <View style={styles.mapLegendRow}>
+              <View style={[styles.mapLegendDot, { backgroundColor: C.PASSENGER_MAP }]} />
+              <Text style={styles.mapLegendText}>Passengers</Text>
             </View>
             <View style={styles.mapLegendRow}>
               <View style={[styles.mapLegendDot, { backgroundColor: C.ACCENT }]} />
@@ -1160,12 +1173,30 @@ function ActiveView({
               ) : (
                 <Ionicons name="person-add" size={32} color="#FFFFFF" />
               )}
-              <Text style={styles.onboardButtonText}>{isFull ? 'TRIP FULL' : '+1 ONBOARDED'}</Text>
-              {!isFull ? <Text style={styles.onboardButtonSub}>tap when passenger boards</Text> : null}
+              <Text style={styles.onboardButtonText}>{isFull ? 'TRIP FULL' : '+1 WALK-UP'}</Text>
+              {!isFull ? <Text style={styles.onboardButtonSub}>passenger without reservation</Text> : null}
             </View>
           </Pressable>
         </View>
       )}
+
+      {tripReservations?.length ? (
+        <View style={styles.reservationList}>
+          <Text style={styles.reservationListTitle}>Reserved passengers — tap to board</Text>
+          {tripReservations.map((r) => (
+            <Pressable
+              key={r.id}
+              onPress={() => onBoardReservation?.(r.id)}
+              style={({ pressed }) => [styles.reservationRow, pressed && { opacity: 0.85 }]}>
+              <Ionicons name="ticket-outline" size={16} color={C.ACCENT} />
+              <Text style={styles.reservationRowText} numberOfLines={1}>
+                {r.pickup_stop ? `${r.pickup_stop} · ` : ''}Seat {r.passenger_id?.slice(0, 8) ?? 'passenger'}
+              </Text>
+              <Text style={styles.reservationBoardBtn}>Board</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
 
       {!showMap ? (
         <View style={styles.activeFooter}>
@@ -1199,6 +1230,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
   const [departLoading, setDepartLoading] = useState(false);
   const [reservationBannerKey, setReservationBannerKey] = useState(0);
   const [reservationCount, setReservationCount] = useState(0);
+  const [tripReservations, setTripReservations] = useState([]);
   const [mateCoords, setMateCoords] = useState(null);
   const mateCoordsRef = useRef(null);
   useEffect(() => { mateCoordsRef.current = mateCoords; }, [mateCoords]);
@@ -1322,6 +1354,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
       }
       if (event.reservations) {
         setReservationCount(event.reservations.length);
+        setTripReservations(event.reservations);
         setLastSyncAt(Date.now());
       }
       refreshActiveTripData(tripId);
@@ -1563,6 +1596,24 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
     });
   }, [mateId]);
 
+  const boardReservedPassenger = useCallback(async (reservationId) => {
+    if (!mateId || !reservationId) return;
+    const { data, error } = await boardReservation(reservationId, mateId);
+    if (error || data?.ok === false) {
+      Alert.alert('Could not board', error?.message ?? data?.error ?? 'Try again');
+      return;
+    }
+    setTrip((current) => {
+      if (!current) return current;
+      const seatsLeft = data.available_seats ?? current.seatsLeft;
+      return {
+        ...current,
+        seatsLeft,
+        passengersOnboarded: current.passengersOnboarded + 1,
+      };
+    });
+  }, [mateId]);
+
   const markTripFull = useCallback(() => {
     setTrip((current) => {
       if (!current || current.seatsLeft === 0) return current;
@@ -1708,7 +1759,9 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
           </View>
           <View>
             <Text style={styles.dashboardName} numberOfLines={1}>{profile?.full_name ?? 'Mate Dashboard'}</Text>
-            <Text style={styles.dashboardSub} numberOfLines={1}>{profile?.vehicle_registration ?? 'No vehicle on file'}</Text>
+            <Text style={styles.dashboardSub} numberOfLines={1}>
+              {[profile?.vehicle_type, profile?.vehicle_registration].filter(Boolean).join(' · ') || 'No vehicle on file'}
+            </Text>
           </View>
         </View>
         <Pressable
@@ -1754,18 +1807,21 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
             lastSyncAt={lastSyncAt}
             startWithCustomEditor={setupOpenCustom}
             mateCoords={mateCoords}
+            vehicleType={profile?.vehicle_type ?? DEFAULT_VEHICLE_TYPE}
           />
         ) : null}
         {mode === 'active' && trip ? (
           <ActiveView
             trip={trip}
             onOnboard={onboard}
+            onBoardReservation={boardReservedPassenger}
             onTripFull={markTripFull}
             onEndTrip={handleEndTrip}
             onOpenEarn={onOpenEarn}
             onUpdateDestination={updateActiveTripDestination}
             reservationBannerKey={reservationBannerKey}
             reservationCount={reservationCount}
+            tripReservations={tripReservations}
             mateCoords={mateCoords}
             passengerLocations={passengerLocations}
             lastSyncAt={lastSyncAt}
@@ -1867,7 +1923,7 @@ const styles = StyleSheet.create({
   sectionLabel:        { color: C.TEXT_MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 12, marginTop: 8 },
   routeList:           { gap: 8, marginBottom: 24 },
   routeRow:            { flexDirection: 'row', alignItems: 'center', backgroundColor: C.SURFACE, borderRadius: 14, paddingHorizontal: 16, minHeight: 58, borderWidth: 1, borderColor: C.BORDER, gap: 14 },
-  routeRowSelected:    { borderColor: C.ACCENT + '80', backgroundColor: 'rgba(249,115,22,0.08)' },
+  routeRowSelected:    { borderColor: C.ACCENT + '80', backgroundColor: 'rgba(243,111,33,0.08)' },
   routeRadio:          { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: C.TEXT_MUTED, alignItems: 'center', justifyContent: 'center' },
   routeRadioSelected:  { borderColor: C.ACCENT },
   routeRadioDot:       { width: 10, height: 10, borderRadius: 5, backgroundColor: C.ACCENT },
@@ -1892,7 +1948,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     minHeight: 52, borderRadius: 14,
     borderWidth: 1, borderStyle: 'dashed', borderColor: C.ACCENT + '66',
-    backgroundColor: 'rgba(249,115,22,0.05)',
+    backgroundColor: 'rgba(243,111,33,0.05)',
     marginBottom: 24,
   },
   addCustomText: { color: C.ACCENT, fontSize: 14, fontWeight: '700' },
@@ -1922,7 +1978,7 @@ const styles = StyleSheet.create({
   destinationIcon: {
     width: 40, height: 40, borderRadius: 14,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: C.ACCENT_SOFT ?? 'rgba(249,115,22,0.12)',
+    backgroundColor: C.ACCENT_SOFT ?? 'rgba(243,111,33,0.12)',
     borderWidth: 1, borderColor: C.ACCENT + '40',
   },
   destinationText: { flex: 1 },
@@ -1946,7 +2002,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 8, paddingVertical: 3,
     borderRadius: 8,
-    backgroundColor: C.ACCENT_SOFT ?? 'rgba(249,115,22,0.12)',
+    backgroundColor: C.ACCENT_SOFT ?? 'rgba(243,111,33,0.12)',
     borderWidth: 1, borderColor: C.ACCENT + '40',
   },
   myLocChipText: { color: C.ACCENT, fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
@@ -1993,6 +2049,7 @@ const styles = StyleSheet.create({
   stepperCenter:       { flex: 1, alignItems: 'center' },
   stepperValue:        { color: C.TEXT, fontSize: 38, fontWeight: '800', lineHeight: 42 },
   stepperHint:         { color: C.TEXT_MUTED, fontSize: 12, fontWeight: '600' },
+  stepperSubLabel:     { color: C.TEXT_SUB, fontSize: 12, fontWeight: '600', marginBottom: 8 },
   departButton:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: C.ACCENT, borderRadius: 14, minHeight: 58, gap: 10, marginTop: 8, shadowColor: C.ACCENT, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 12 },
   departButtonDisabled:{ backgroundColor: C.SURFACE_UP, shadowOpacity: 0 },
   departButtonText:    { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
@@ -2009,7 +2066,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 8, paddingVertical: 4,
     borderRadius: 8,
-    backgroundColor: C.ACCENT_SOFT ?? 'rgba(249,115,22,0.12)',
+    backgroundColor: C.ACCENT_SOFT ?? 'rgba(243,111,33,0.12)',
     borderWidth: 1, borderColor: C.ACCENT + '40',
   },
   editDestBtnText: { color: C.ACCENT, fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
@@ -2041,10 +2098,24 @@ const styles = StyleSheet.create({
   activeBody:      { flex: 1, minHeight: 120 },
   activeFooter:    { paddingTop: 12, paddingBottom: TAB_FOOTER_CLEARANCE, borderTopWidth: 1, borderTopColor: C.BORDER },
   onboardButton:   { flex: 1, minHeight: 140, borderRadius: 20, backgroundColor: C.ACCENT, alignItems: 'center', justifyContent: 'center', shadowColor: C.ACCENT, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 8 },
-  onboardButtonFull: { backgroundColor: '#7F1D1D', shadowOpacity: 0 },
+  onboardButtonFull: { backgroundColor: Theme.colors.seatFull, shadowOpacity: 0 },
   onboardButtonInner: { alignItems: 'center', gap: 8 },
   onboardButtonText:  { color: '#FFFFFF', fontSize: 28, fontWeight: '900', letterSpacing: 0.5 },
   onboardButtonSub:   { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '500' },
+  reservationList: { paddingHorizontal: 20, paddingBottom: 12, gap: 8 },
+  reservationListTitle: { color: C.TEXT_SUB, fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  reservationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: C.SURFACE,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: C.BORDER,
+  },
+  reservationRowText: { flex: 1, color: C.TEXT, fontSize: 13, fontWeight: '600' },
+  reservationBoardBtn: { color: C.ACCENT, fontWeight: '800', fontSize: 13 },
   activeSecondaryRow: { flexDirection: 'row', gap: 12 },
   fullButton:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.SURFACE, borderRadius: 14, minHeight: 52, borderWidth: 1, borderColor: C.ACCENT + '50' },
   fullButtonText:{ color: C.ACCENT, fontSize: 15, fontWeight: '700' },
@@ -2063,7 +2134,7 @@ const styles = StyleSheet.create({
     borderWidth: 2.5, borderColor: '#FFFFFF',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.35, shadowRadius: 4,
   },
-  tripPinOrigin:       { backgroundColor: '#22C55E' },
+  tripPinOrigin:       { backgroundColor: Theme.colors.success },
   tripPinDest:         { backgroundColor: C.ACCENT },
   tripPinLabel:        {
     marginTop: 4,

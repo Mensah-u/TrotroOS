@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     minHeight: 50,
     borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.45)',
+    borderColor: 'rgba(243,111,33,0.45)',
     marginBottom: 20,
   },
   secondaryText: { color: Theme.colors.mate, fontSize: 15, fontWeight: '700' },

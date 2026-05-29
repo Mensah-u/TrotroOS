@@ -16,19 +16,7 @@ import {
   subscribeToPassengerHistory,
   supabase,
 } from '@/services/supabase';
-
-const C = {
-  BG:         '#0C0C0C',
-  SURFACE:    '#161616',
-  SURFACE_UP: '#1E1E1E',
-  BORDER:     'rgba(255,255,255,0.07)',
-  ACCENT:     '#F97316',
-  SUCCESS:    '#22C55E',
-  DANGER:     '#EF4444',
-  TEXT:       '#F9FAFB',
-  TEXT_SUB:   '#9CA3AF',
-  TEXT_MUTED: '#4B5563',
-};
+import { C } from '@/constants/theme';
 
 const TABS = [
   { id: 'passenger', label: 'My Rides',  icon: 'person' },
@@ -66,11 +54,19 @@ function fareForRoute(routeLabel) {
 }
 
 // ─── Row components ──────────────────────────────────────────────────────────
-function PassengerRow({ reservation }) {
+function PassengerRow({ reservation, navigation }) {
   const trip = reservation.trips ?? {};
   const mate = trip.mate_profiles ?? {};
   const s    = statusMeta(reservation.status);
   const fare = fareForRoute(trip.route ?? '');
+
+  const bookAgain = () => {
+    const parts = (trip.route ?? '').split('→').map((p) => p.trim());
+    navigation.getParent()?.navigate('Find Ride', {
+      prefillFrom: trip.origin ?? parts[0],
+      prefillTo: trip.destination ?? parts[1],
+    });
+  };
 
   return (
     <View style={styles.card}>
@@ -110,6 +106,9 @@ function PassengerRow({ reservation }) {
             <Text style={styles.fareText}>GHS {fare}</Text>
           </View>
         ) : null}
+        <Pressable onPress={bookAgain} style={styles.rebookBtn}>
+          <Text style={styles.rebookText}>Book again</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -288,7 +287,7 @@ export default function TripHistoryScreen({ navigation }) {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.ACCENT} />
         }
         renderItem={({ item }) =>
-          tab === 'passenger' ? <PassengerRow reservation={item} /> : <MateTripRow trip={item} />
+          tab === 'passenger' ? <PassengerRow reservation={item} navigation={navigation} /> : <MateTripRow trip={item} />
         }
         ListEmptyComponent={
           tab === 'passenger' ? (
@@ -313,7 +312,7 @@ const styles = StyleSheet.create({
 
   tabRow:       { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
   tab:          { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, backgroundColor: C.SURFACE, borderWidth: 1, borderColor: C.BORDER },
-  tabActive:    { borderColor: C.ACCENT + '70', backgroundColor: 'rgba(249,115,22,0.08)' },
+  tabActive:    { borderColor: C.ACCENT + '70', backgroundColor: 'rgba(243,111,33,0.08)' },
   tabText:      { color: C.TEXT_SUB, fontSize: 13, fontWeight: '700' },
   tabTextActive:{ color: C.ACCENT },
 
@@ -325,7 +324,7 @@ const styles = StyleSheet.create({
 
   card:         { backgroundColor: C.SURFACE, borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: C.BORDER },
   cardTop:      { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  cardIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(249,115,22,0.1)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(249,115,22,0.3)' },
+  cardIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(243,111,33,0.1)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(243,111,33,0.3)' },
   cardMain:     { flex: 1, paddingRight: 8, minWidth: 0 },
   cardTitle:    { color: C.TEXT, fontSize: 16, fontWeight: '800', letterSpacing: -0.2 },
   cardSub:      { color: C.TEXT_SUB, fontSize: 12, fontWeight: '500', marginTop: 3 },
@@ -338,10 +337,12 @@ const styles = StyleSheet.create({
   metaItem:     { flexDirection: 'row', alignItems: 'center', gap: 5 },
   metaText:     { color: C.TEXT_SUB, fontSize: 12, fontWeight: '500' },
 
-  platePill:    { marginLeft: 'auto', backgroundColor: '#0C0C0C', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  platePill:    { marginLeft: 'auto', backgroundColor: '#121212', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
   plateText:    { color: C.TEXT, fontSize: 11, fontWeight: '800', letterSpacing: 1, fontFamily: 'monospace' },
   farePill:     { backgroundColor: 'rgba(34,197,94,0.12)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: 'rgba(34,197,94,0.25)' },
   fareText:     { color: C.SUCCESS, fontSize: 11, fontWeight: '800' },
+  rebookBtn:    { marginLeft: 'auto', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: C.ACCENT + '55' },
+  rebookText:   { color: C.ACCENT, fontSize: 11, fontWeight: '800' },
 
   empty:        { alignItems: 'center', paddingTop: 64, gap: 10 },
   emptyIcon:    { width: 64, height: 64, borderRadius: 20, backgroundColor: C.SURFACE, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.BORDER, marginBottom: 4 },

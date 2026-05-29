@@ -7,6 +7,18 @@ export const placeCoords = {
   'KNUST Campus': { latitude: 6.674, longitude: -1.571 },
   'Kejetia': { latitude: 6.690, longitude: -1.624 },
   'Bantama': { latitude: 6.695, longitude: -1.635 },
+  'KNUST Gate': { latitude: 6.676, longitude: -1.568 },
+  'Ayeduase Junction': { latitude: 6.680, longitude: -1.555 },
+};
+
+/** Named pickup stops (stages) per route corridor. */
+export const pickupStops = {
+  '1': ['Tech Junction', 'Ayeduase Junction', 'Ayeduase'],
+  '2': ['Tech Junction', 'KNUST Gate', 'KNUST Campus'],
+  '3': ['Ayeduase', 'Ayeduase Junction', 'Tech Junction'],
+  '4': ['Kejetia', 'Bantama', 'Ayeduase'],
+  '5': ['Bantama', 'Tech Junction'],
+  '6': ['KNUST Campus', 'KNUST Gate', 'Ayeduase'],
 };
 
 export const routes = [
@@ -133,6 +145,34 @@ export function findRouteByPlaces(origin, destination) {
 export function getPlaceCoords(place) {
   if (!place) return null;
   return placeCoords[place] ?? null;
+}
+
+/** Pickup stops for a route id or origin→destination pair. */
+export function getPickupStopsForRoute(routeOrId) {
+  if (!routeOrId) return [];
+  const id = typeof routeOrId === 'string' ? routeOrId : routeOrId.id;
+  if (pickupStops[id]) return pickupStops[id];
+  const route = typeof routeOrId === 'object' ? routeOrId : findRouteById(id);
+  if (!route) return [];
+  return [route.origin, route.destination].filter(Boolean);
+}
+
+export function getAllPickupStops() {
+  return [...new Set(Object.values(pickupStops).flat())].sort();
+}
+
+/** Historical ETA averages per route id (minutes). */
+export const historicalEta = {
+  '1': { pickup: { min: 4, max: 12 }, trip: { min: 10, max: 18 } },
+  '2': { pickup: { min: 3, max: 10 }, trip: { min: 8, max: 15 } },
+  '3': { pickup: { min: 5, max: 14 }, trip: { min: 10, max: 20 } },
+  '4': { pickup: { min: 8, max: 20 }, trip: { min: 25, max: 40 } },
+  '5': { pickup: { min: 6, max: 16 }, trip: { min: 18, max: 30 } },
+  '6': { pickup: { min: 4, max: 11 }, trip: { min: 9, max: 16 } },
+};
+
+export function getHistoricalEta(routeId) {
+  return historicalEta[routeId] ?? { pickup: { min: 5, max: 15 }, trip: { min: 12, max: 25 } };
 }
 
 export function tripMatchesRoute(trip, origin, destination) {

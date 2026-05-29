@@ -17,6 +17,7 @@ import { APP_NAME } from '@/constants/appInfo';
 import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { Theme } from '@/constants/theme';
 import { getOrCreateDeviceId } from '@/services/passengerProfile';
+import { buildRouteShareUrl, buildSmsInviteBody, openSmsInvite } from '@/services/shareLinks';
 
 const INVITE_URL = 'https://trotroos.app';
 
@@ -36,7 +37,7 @@ export default function InviteFriendsScreen({ navigation }) {
     }, []),
   );
 
-  const shareMsg = `Try ${APP_NAME} — real-time trotro seats for Kumasi. Use my invite code ${referralCode} when you sign up. ${INVITE_URL}`;
+  const shareMsg = `Try ${APP_NAME} — real-time trotro seats for Kumasi. Use my invite code ${referralCode}. ${buildRouteShareUrl('Tech Junction', 'KNUST Campus', referralCode)}`;
 
   const share = async () => {
     try {
@@ -65,18 +66,27 @@ export default function InviteFriendsScreen({ navigation }) {
     }
   };
 
+  const smsInvite = async () => {
+    const body = buildSmsInviteBody({
+      route: { origin: 'Tech Junction', destination: 'KNUST Campus' },
+      refCode: referralCode,
+    });
+    await openSmsInvite(body);
+  };
+
   const copyLink = async () => {
+    const link = buildRouteShareUrl('Tech Junction', 'KNUST Campus', referralCode);
     if (Clipboard?.setStringAsync) {
       try {
-        await Clipboard.setStringAsync(INVITE_URL);
-        Alert.alert('Copied', `${INVITE_URL} copied to clipboard.`);
+        await Clipboard.setStringAsync(link);
+        Alert.alert('Copied', `${link} copied to clipboard.`);
         return;
       } catch {}
     }
     try {
-      await Share.share({ message: INVITE_URL, title: 'TrotroOS link' });
+      await Share.share({ message: link, title: 'TrotroOS link' });
     } catch {
-      Alert.alert('Link', INVITE_URL);
+      Alert.alert('Link', link);
     }
   };
 
@@ -106,6 +116,11 @@ export default function InviteFriendsScreen({ navigation }) {
         <Pressable onPress={share} style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.85 }]}>
           <Ionicons name="share-social-outline" size={20} color="#FFFFFF" />
           <Text style={styles.primaryText}>Share via apps</Text>
+        </Pressable>
+
+        <Pressable onPress={smsInvite} style={({ pressed }) => [styles.secondaryBtn, pressed && { opacity: 0.85 }]}>
+          <Ionicons name="chatbubble-outline" size={18} color={Theme.colors.passenger} />
+          <Text style={styles.secondaryText}>SMS invite</Text>
         </Pressable>
 
         <Pressable onPress={copyLink} style={({ pressed }) => [styles.secondaryBtn, pressed && { opacity: 0.85 }]}>

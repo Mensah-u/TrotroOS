@@ -144,6 +144,11 @@ export default function AppDiagnosticsScreen({ navigation }) {
             <Ionicons name="trash-outline" size={16} color={Theme.colors.danger} />
             <Text style={[styles.actionText, { color: Theme.colors.danger }]}>Clear local cache</Text>
           </Pressable>
+          <View style={styles.divider} />
+          <Pressable onPress={() => navigation.navigate('AdminDashboard')} style={({ pressed }) => [styles.actionRow, pressed && { opacity: 0.7 }]}>
+            <Ionicons name="grid-outline" size={16} color={Theme.colors.passenger} />
+            <Text style={styles.actionText}>Open admin dashboard</Text>
+          </Pressable>
         </View>
 
         <View style={styles.tipCard}>

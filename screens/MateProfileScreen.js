@@ -13,17 +13,18 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FormInput } from '@/components/FormInput';
+import VehicleTypePicker from '@/components/VehicleTypePicker';
 import { useAppSession } from '@/context/AppSessionContext';
 import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { formatRoute, routes } from '@/constants/routes';
+import { DEFAULT_VEHICLE_TYPE, normalizeVehicleType } from '@/constants/vehicleTypes';
+import { Theme } from '@/constants/theme';
 import {
   getCurrentMate,
   getMateProfile,
   upsertMateProfile,
 } from '@/services/supabase';
 import { formatSupabaseError } from '@/utils/supabaseErrors';
-
-const VEHICLE_TYPES = ['Trotro', 'Bus'];
 
 function findRouteIdByLabel(label) {
   if (!label) return null;
@@ -45,7 +46,7 @@ export default function MateProfileScreen({ navigation, route }) {
     initialProfile?.vehicle_registration ?? '',
   );
   const [vehicleType, setVehicleType] = useState(
-    initialProfile?.vehicle_type ?? 'Trotro',
+    normalizeVehicleType(initialProfile?.vehicle_type ?? DEFAULT_VEHICLE_TYPE),
   );
   const [defaultRouteId, setDefaultRouteId] = useState(
     findRouteIdByLabel(initialProfile?.default_route),
@@ -68,7 +69,7 @@ export default function MateProfileScreen({ navigation, route }) {
       setFullName(data.full_name ?? '');
       setPhoneNumber(data.phone_number ?? '');
       setVehicleRegistration(data.vehicle_registration ?? '');
-      setVehicleType(data.vehicle_type ?? 'Trotro');
+      setVehicleType(normalizeVehicleType(data.vehicle_type ?? DEFAULT_VEHICLE_TYPE));
       setDefaultRouteId(findRouteIdByLabel(data.default_route));
       setLoading(false);
     })();
@@ -150,7 +151,7 @@ export default function MateProfileScreen({ navigation, route }) {
           accessibilityRole="button"
           accessibilityLabel="Back">
           <View style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={20} color="#F9FAFB" />
+            <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
           </View>
         </Pressable>
         <Text style={styles.headerTitle}>Edit Profile</Text>
@@ -193,31 +194,7 @@ export default function MateProfileScreen({ navigation, route }) {
           />
 
           <Text style={styles.sectionLabel}>Vehicle Type</Text>
-          <View style={styles.segmentRow}>
-            {VEHICLE_TYPES.map((type) => {
-              const isSelected = vehicleType === type;
-              return (
-                <Pressable
-                  key={type}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: isSelected }}
-                  onPress={() => setVehicleType(type)}
-                  style={({ pressed }) => [
-                    styles.segment,
-                    isSelected && styles.segmentSelected,
-                    pressed && styles.pressedOpacity,
-                  ]}>
-                  <Text
-                    style={[
-                      styles.segmentText,
-                      isSelected && styles.segmentTextSelected,
-                    ]}>
-                    {type}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <VehicleTypePicker value={vehicleType} onChange={setVehicleType} />
 
           <Text style={styles.sectionLabel}>Default Route</Text>
           <View style={styles.routeList}>
@@ -243,7 +220,7 @@ export default function MateProfileScreen({ navigation, route }) {
 
           {errorMsg ? (
             <View style={styles.errorRow}>
-              <Ionicons name="alert-circle-outline" size={15} color="#F87171" />
+              <Ionicons name="alert-circle-outline" size={15} color={Theme.colors.error} />
               <Text style={styles.error}>{errorMsg}</Text>
             </View>
           ) : null}
@@ -257,7 +234,7 @@ export default function MateProfileScreen({ navigation, route }) {
               saving && styles.primaryButtonDisabled,
               pressed && !saving && styles.pressedOpacity,
             ]}>
-            <Ionicons name="checkmark" size={20} color={saving ? '#9CA3AF' : '#FFFFFF'} />
+            <Ionicons name="checkmark" size={20} color={saving ? '#E0E0E0' : '#FFFFFF'} />
             <Text style={styles.primaryButtonText}>
               {saving ? 'Saving…' : 'Save Changes'}
             </Text>
@@ -267,7 +244,7 @@ export default function MateProfileScreen({ navigation, route }) {
             accessibilityRole="button"
             onPress={handleSwitchToPassenger}
             style={({ pressed }) => [styles.switchButton, pressed && styles.pressedOpacity]}>
-            <Ionicons name="swap-horizontal-outline" size={18} color="#F97316" />
+            <Ionicons name="swap-horizontal-outline" size={18} color="#F36F21" />
             <Text style={styles.switchText}>Switch to Passenger</Text>
           </Pressable>
 
@@ -280,7 +257,7 @@ export default function MateProfileScreen({ navigation, route }) {
               signingOut && styles.signOutButtonDisabled,
               pressed && !signingOut && styles.pressedOpacity,
             ]}>
-            <Ionicons name="log-out-outline" size={18} color="#F87171" />
+            <Ionicons name="log-out-outline" size={18} color={Theme.colors.error} />
             <Text style={styles.signOutText}>
               {signingOut ? 'Signing out…' : 'Sign Out'}
             </Text>
@@ -292,7 +269,7 @@ export default function MateProfileScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0C0C0C' },
+  safeArea: { flex: 1, backgroundColor: '#121212' },
   flex1:    { flex: 1 },
   pressedOpacity: { opacity: 0.8 },
 
@@ -301,15 +278,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)',
   },
-  headerTitle: { color: '#F9FAFB', fontSize: 18, fontWeight: '800' },
+  headerTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
   iconButton:  { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  backBtn:     { width: 36, height: 36, borderRadius: 10, backgroundColor: '#161616', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
+  backBtn:     { width: 36, height: 36, borderRadius: 10, backgroundColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
 
   scrollContent: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: TAB_BAR_CLEARANCE },
-  loadingText:   { color: '#9CA3AF', fontSize: 14, marginBottom: 12 },
+  loadingText:   { color: '#E0E0E0', fontSize: 14, marginBottom: 12 },
 
   sectionLabel: {
-    color: '#4B5563', fontSize: 11, fontWeight: '700',
+    color: '#A8A8A8', fontSize: 11, fontWeight: '700',
     textTransform: 'uppercase', letterSpacing: 1,
     marginBottom: 10, marginTop: 24,
   },
@@ -317,31 +294,31 @@ const styles = StyleSheet.create({
   segmentRow: { flexDirection: 'row', gap: 10, marginBottom: 4 },
   segment: {
     flex: 1, minHeight: 52, borderRadius: 12,
-    backgroundColor: '#161616', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
   },
-  segmentSelected:     { borderColor: 'rgba(249,115,22,0.7)', backgroundColor: 'rgba(249,115,22,0.1)' },
-  segmentText:         { color: '#9CA3AF', fontSize: 15, fontWeight: '600' },
-  segmentTextSelected: { color: '#F9FAFB' },
+  segmentSelected:     { borderColor: 'rgba(243,111,33,0.7)', backgroundColor: 'rgba(243,111,33,0.1)' },
+  segmentText:         { color: '#E0E0E0', fontSize: 15, fontWeight: '600' },
+  segmentTextSelected: { color: '#FFFFFF' },
 
   routeList: { gap: 8, marginBottom: 4 },
   routeRow: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#161616', borderRadius: 12,
+    backgroundColor: '#1E1E1E', borderRadius: 12,
     paddingHorizontal: 16, minHeight: 54, gap: 14,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
   },
-  routeRowSelected:     { borderColor: 'rgba(249,115,22,0.6)', backgroundColor: 'rgba(249,115,22,0.07)' },
-  routeRadio:           { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#4B5563', alignItems: 'center', justifyContent: 'center' },
-  routeRadioSelected:   { borderColor: '#F97316' },
-  routeRadioDot:        { width: 10, height: 10, borderRadius: 5, backgroundColor: '#F97316' },
-  routeRowText:         { color: '#9CA3AF', fontSize: 15, fontWeight: '600', flex: 1 },
-  routeRowTextSelected: { color: '#F9FAFB' },
+  routeRowSelected:     { borderColor: 'rgba(243,111,33,0.6)', backgroundColor: 'rgba(243,111,33,0.07)' },
+  routeRadio:           { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#A8A8A8', alignItems: 'center', justifyContent: 'center' },
+  routeRadioSelected:   { borderColor: '#F36F21' },
+  routeRadioDot:        { width: 10, height: 10, borderRadius: 5, backgroundColor: '#F36F21' },
+  routeRowText:         { color: '#E0E0E0', fontSize: 15, fontWeight: '600', flex: 1 },
+  routeRowTextSelected: { color: '#FFFFFF' },
 
   primaryButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    backgroundColor: '#F97316', borderRadius: 14, minHeight: 56,
-    marginTop: 20, shadowColor: '#F97316',
+    backgroundColor: '#F36F21', borderRadius: 14, minHeight: 56,
+    marginTop: 20, shadowColor: '#F36F21',
     shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 12,
   },
   primaryButtonDisabled: { backgroundColor: '#374151', shadowOpacity: 0 },
@@ -350,10 +327,10 @@ const styles = StyleSheet.create({
   switchButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
     minHeight: 52, borderRadius: 14,
-    borderWidth: 1, borderColor: 'rgba(249,115,22,0.4)',
-    backgroundColor: 'rgba(249,115,22,0.08)', marginTop: 20,
+    borderWidth: 1, borderColor: 'rgba(243,111,33,0.4)',
+    backgroundColor: 'rgba(243,111,33,0.08)', marginTop: 20,
   },
-  switchText: { color: '#F97316', fontSize: 15, fontWeight: '700' },
+  switchText: { color: '#F36F21', fontSize: 15, fontWeight: '700' },
 
   signOutButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
@@ -362,7 +339,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(239,68,68,0.06)', marginTop: 16,
   },
   signOutButtonDisabled: { opacity: 0.5 },
-  signOutText:   { color: '#F87171', fontSize: 15, fontWeight: '700' },
+  signOutText:   { color: Theme.colors.error, fontSize: 15, fontWeight: '700' },
 
   errorRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -370,5 +347,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 10,
     borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)', marginVertical: 8,
   },
-  error: { color: '#F87171', fontSize: 13, flex: 1 },
+  error: { color: Theme.colors.error, fontSize: 13, flex: 1 },
 });

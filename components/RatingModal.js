@@ -13,17 +13,20 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Theme } from '@/constants/theme';
+
 const C = {
   BG_OVERLAY: 'rgba(0,0,0,0.78)',
-  SURFACE:    '#161616',
-  SURFACE_UP: '#1E1E1E',
-  BORDER:     'rgba(255,255,255,0.07)',
-  ACCENT:     '#F97316',
-  STAR:       '#FBBF24',
-  TEXT:       '#F9FAFB',
-  TEXT_SUB:   '#9CA3AF',
-  TEXT_MUTED: '#4B5563',
-  DANGER:     '#EF4444',
+  SURFACE:    Theme.colors.surface,
+  SURFACE_UP: Theme.colors.surfaceUp,
+  BORDER:     Theme.colors.border,
+  ACCENT:     Theme.colors.mate,
+  STAR:       Theme.colors.gold,
+  TEXT:       Theme.colors.text,
+  TEXT_SUB:   Theme.colors.textSub,
+  TEXT_MUTED: Theme.colors.textMuted,
+  DANGER:     Theme.colors.error,
+  SUCCESS:    Theme.colors.success,
 };
 
 export default function RatingModal({ visible, trip, mateName, onSubmit, onSkip }) {
@@ -78,7 +81,7 @@ export default function RatingModal({ visible, trip, mateName, onSubmit, onSkip 
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}>
               <View style={styles.headerIcon}>
-                <Ionicons name="checkmark-circle" size={36} color="#22C55E" />
+                <Ionicons name="checkmark-circle" size={36} color={Theme.colors.success} />
               </View>
               <Text style={styles.title}>Trip complete!</Text>
               <Text style={styles.sub}>

@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as Linking from 'expo-linking';
 
 import { SUPABASE_ANON_KEY, SUPABASE_URL, assertClientConfig } from '@/constants/config';
+import { DEFAULT_VEHICLE_TYPE } from '@/constants/vehicleTypes';
 import { boundingBox, withinBbox } from '@/utils/geo';
 
 assertClientConfig();
@@ -75,7 +76,7 @@ export async function ensureMateProfile(user) {
     full_name: meta.full_name ?? user.email?.split('@')[0] ?? 'Mate',
     phone_number: meta.phone_number ?? '0000000000',
     vehicle_registration: meta.vehicle_registration ?? 'PENDING',
-    vehicle_type: meta.vehicle_type ?? 'Trotro',
+    vehicle_type: meta.vehicle_type ?? DEFAULT_VEHICLE_TYPE,
   });
   return { error };
 }
@@ -360,7 +361,14 @@ export function isPassengerLocationsAvailable() {
   return passengerLocationsSupported;
 }
 
-export async function upsertPassengerLocation(deviceId, reservationId, latitude, longitude, queuedRoute = null) {
+export async function upsertPassengerLocation(
+  deviceId,
+  reservationId,
+  latitude,
+  longitude,
+  queuedRoute = null,
+  pickupStop = null,
+) {
   if (!passengerLocationsSupported) {
     return { data: null, error: null };
   }
@@ -372,6 +380,7 @@ export async function upsertPassengerLocation(deviceId, reservationId, latitude,
     updated_at:      new Date().toISOString(),
   };
   if (queuedRoute !== undefined) payload.queued_route = queuedRoute ?? null;
+  if (pickupStop !== undefined && pickupStop !== null) payload.pickup_stop = pickupStop;
   const result = await supabase
     .from(T.PASSENGER_LOCATIONS)
     .upsert(payload, { onConflict: 'passenger_id' });

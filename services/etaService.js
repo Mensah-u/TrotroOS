@@ -30,6 +30,7 @@
  */
 
 import { ETA_SERVICE_URL } from '@/constants/config';
+import { getHistoricalEta } from '@/constants/routes';
 import { estimatePickupEta as localEstimatePickupEta, formatEtaRange } from '@/utils/rideEta';
 
 const TTL_MS = 60_000;
@@ -106,6 +107,18 @@ export function getEta(params) {
   const now = Date.now();
   const hit = cache.get(key);
   if (hit && hit.expiresAt > now) return hit.value;
+
+  if (params.routeMeta?.id && !params.driverCoords) {
+    const h = getHistoricalEta(params.routeMeta.id);
+    const historical = {
+      minMinutes: h.pickup.min,
+      maxMinutes: h.pickup.max,
+      confidence: 'historical',
+      label: formatEtaRange(h.pickup.min, h.pickup.max),
+    };
+    cache.set(key, { value: historical, expiresAt: now + TTL_MS });
+    return historical;
+  }
 
   const local = localEstimatePickupEta(params);
   cache.set(key, { value: local, expiresAt: now + TTL_MS });

@@ -1,38 +1,87 @@
 /** TrotroOS design system — single source of truth for premium UI. */
+export const Brand = {
+  primary: '#F36F21',
+  bg: '#121212',
+  card: '#1E1E1E',
+  text: '#FFFFFF',
+  textSoft: '#E0E0E0',
+};
+
+/** Map & role-specific colors. */
+export const RoleColors = {
+  mateMap: '#2196F3',
+  passengerMap: '#66BB6A',
+  error: '#FF5252',
+  success: '#4CAF50',
+};
+
+/** Seat availability status colors. */
+export const SeatStatus = {
+  plenty: '#4CAF50',
+  filling: '#FFC107',
+  almostFull: '#F44336',
+  full: '#B71C1C',
+};
+
+/**
+ * Seat urgency bands:
+ * - 5+ plenty (green)
+ * - 2–4 filling (yellow)
+ * - 1 almost full (red)
+ * - 0 full (dark red)
+ */
+export function getSeatStatus(seats) {
+  const n = Math.max(0, Number(seats) || 0);
+  if (n === 0) {
+    return { level: 'full', color: SeatStatus.full, label: 'Full', dot: SeatStatus.full };
+  }
+  if (n === 1) {
+    return { level: 'almostFull', color: SeatStatus.almostFull, label: '1 seat left', dot: SeatStatus.almostFull };
+  }
+  if (n <= 4) {
+    return { level: 'filling', color: SeatStatus.filling, label: `${n} seats`, dot: SeatStatus.filling };
+  }
+  return { level: 'plenty', color: SeatStatus.plenty, label: `${n} seats`, dot: SeatStatus.plenty };
+}
+
 export const Theme = {
   colors: {
-    bg: '#050505',
-    bgElevated: '#0A0A0A',
-    surface: '#111111',
-    surfaceUp: '#1A1A1A',
+    ...Brand,
+    ...RoleColors,
+    bgElevated: Brand.bg,
+    surface: Brand.card,
+    surfaceUp: Brand.card,
     glass: 'rgba(255,255,255,0.04)',
     border: 'rgba(255,255,255,0.08)',
     borderStrong: 'rgba(255,255,255,0.14)',
-    text: '#FAFAFA',
-    textSub: '#A1A1AA',
-    textMuted: '#52525B',
-    mate: '#F97316',
-    mateSoft: 'rgba(249,115,22,0.14)',
-    mateGlow: 'rgba(249,115,22,0.45)',
-    passenger: '#3B82F6',
-    passengerSoft: 'rgba(59,130,246,0.14)',
-    passengerGlow: 'rgba(59,130,246,0.45)',
-    success: '#22C55E',
-    successSoft: 'rgba(34,197,94,0.12)',
-    danger: '#EF4444',
-    gold: '#FBBF24',
-    white: '#FFFFFF',
+    textSub: Brand.textSoft,
+    textMuted: '#A8A8A8',
+    mate: Brand.primary,
+    mateSoft: 'rgba(243,111,33,0.14)',
+    mateGlow: 'rgba(243,111,33,0.45)',
+    passenger: Brand.primary,
+    passengerSoft: 'rgba(243,111,33,0.14)',
+    passengerGlow: 'rgba(243,111,33,0.45)',
+    successSoft: 'rgba(76,175,80,0.12)',
+    errorSoft: 'rgba(255,82,82,0.12)',
+    danger: RoleColors.error,
+    gold: '#FFC107',
+    seatPlenty: SeatStatus.plenty,
+    seatFilling: SeatStatus.filling,
+    seatAlmostFull: SeatStatus.almostFull,
+    seatFull: SeatStatus.full,
+    white: Brand.text,
   },
 
   gradients: {
-    screen: ['#050505', '#0C0C0C', '#101010'],
-    welcome: ['#0A0705', '#0C0C0C', '#050508'],
-    mateHero: ['rgba(249,115,22,0.18)', 'rgba(249,115,22,0)'],
-    passengerHero: ['rgba(59,130,246,0.18)', 'rgba(59,130,246,0)'],
-    mateCard: ['rgba(249,115,22,0.14)', 'rgba(249,115,22,0.03)'],
-    passengerCard: ['rgba(59,130,246,0.14)', 'rgba(59,130,246,0.03)'],
-    buttonMate: ['#FB923C', '#EA580C'],
-    buttonPassenger: ['#60A5FA', '#2563EB'],
+    screen: [Brand.bg, Brand.bg, '#141414'],
+    welcome: ['#141008', Brand.bg, Brand.bg],
+    mateHero: ['rgba(243,111,33,0.18)', 'rgba(243,111,33,0)'],
+    passengerHero: ['rgba(243,111,33,0.14)', 'rgba(243,111,33,0)'],
+    mateCard: ['rgba(33,150,243,0.14)', 'rgba(33,150,243,0.03)'],
+    passengerCard: ['rgba(102,187,106,0.14)', 'rgba(102,187,106,0.03)'],
+    buttonMate: ['#FF8347', '#F36F21'],
+    buttonPassenger: ['#FF8347', '#F36F21'],
   },
 
   radius: {
@@ -62,15 +111,15 @@ export const Theme = {
 };
 
 export const darkMapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#050505' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#52525B' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#050505' }] },
-  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#1A1A1A' }] },
+  { elementType: 'geometry', stylers: [{ color: Brand.bg }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#A8A8A8' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: Brand.bg }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: Brand.card }] },
   { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#141414' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#1F1F1F' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1A1A1A' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#242424' }] },
   { featureType: 'transit', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#030303' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0A0A0A' }] },
 ];
 
 export function glowShadow(color, opacity = 0.4) {
@@ -83,16 +132,22 @@ export function glowShadow(color, opacity = 0.4) {
   };
 }
 
-/** @deprecated Use Theme.colors — kept for gradual migration */
+/** Shared screen palette — import instead of duplicating hex values. */
 export const C = {
-  BG: Theme.colors.bgElevated,
-  SURFACE: Theme.colors.surface,
-  SURFACE_UP: Theme.colors.surfaceUp,
+  BG: Brand.bg,
+  SURFACE: Brand.card,
+  SURFACE_UP: Brand.card,
   BORDER: Theme.colors.border,
-  ACCENT: Theme.colors.mate,
+  ACCENT: Brand.primary,
   ACCENT_SOFT: Theme.colors.mateSoft,
-  SUCCESS: Theme.colors.success,
-  TEXT: Theme.colors.text,
-  TEXT_SUB: Theme.colors.textSub,
+  MATE_MAP: RoleColors.mateMap,
+  PASSENGER_MAP: RoleColors.passengerMap,
+  SUCCESS: RoleColors.success,
+  SUCCESS_SOFT: Theme.colors.successSoft,
+  WARN: SeatStatus.filling,
+  DANGER: RoleColors.error,
+  FULL: SeatStatus.full,
+  TEXT: Brand.text,
+  TEXT_SUB: Brand.textSoft,
   TEXT_MUTED: Theme.colors.textMuted,
 };

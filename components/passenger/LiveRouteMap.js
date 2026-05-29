@@ -17,7 +17,7 @@ import StaticMapDot from '@/components/StaticMapDot';
 
 import { getPlaceCoords } from '@/services/staticData';
 import { SCREEN_GUTTER } from '@/constants/layout';
-import { darkMapStyle, Theme, glowShadow } from '@/constants/theme';
+import { darkMapStyle, Theme, getSeatStatus, glowShadow } from '@/constants/theme';
 import { hapticSelect } from '@/utils/haptics';
 import useViewportClusters from '@/hooks/useViewportClusters';
 import { regionForCluster } from '@/utils/clustering';
@@ -76,7 +76,7 @@ function ReservedVehicleMarker({ driver, trip }) {
         title="Your ride"
         description={trip?.plate ?? trip?.mateName ?? undefined}
         zIndex={999}>
-        <StaticMapDot color={Theme.colors.mate} size={28} />
+        <StaticMapDot color={Theme.colors.mateMap} size={28} />
       </SafeMarker>
     );
   }
@@ -88,7 +88,7 @@ function ReservedVehicleMarker({ driver, trip }) {
       tracksViewChanges={MARKER_TRACKS_CHANGES}
       zIndex={999}>
       <PulsingMapMarker
-        color={Theme.colors.mate}
+        color={Theme.colors.mateMap}
         size={44}
         icon="bus"
         label="YOUR RIDE"
@@ -111,12 +111,8 @@ function ReservedVehicleMarker({ driver, trip }) {
 }
 
 function RideMarker({ driver, trip, selected, dimmed, onSelect, onReserve }) {
+  const { color: baseColor } = getSeatStatus(driver.available_seats);
   const isFull = driver.available_seats === 0;
-  const baseColor = isFull
-    ? '#7F1D1D'
-    : selected
-      ? Theme.colors.passenger
-      : Theme.colors.mate;
 
   if (ANDROID_SAFE_MAP) {
     return (
@@ -165,7 +161,7 @@ function RideMarker({ driver, trip, selected, dimmed, onSelect, onReserve }) {
           {trip?.mateName ? <Text style={styles.calloutMeta}>{trip.mateName}</Text> : null}
           {trip?.plate ? <Text style={styles.calloutPlate}>{trip.plate}</Text> : null}
           {trip?.eta ? <Text style={styles.calloutEta}>Arrives in {trip.eta.label}</Text> : null}
-          <Text style={[styles.calloutSeats, isFull && { color: '#F87171' }]}>
+          <Text style={[styles.calloutSeats, isFull && { color: Theme.colors.error }]}>
             {isFull ? 'Full' : `${driver.available_seats} seats · Tap to choose`}
           </Text>
         </View>
@@ -426,7 +422,7 @@ function MapCanvas({
             tracksViewChanges={false}
             title="You"
             zIndex={200}>
-            <StaticMapDot color="#2563EB" size={24} />
+            <StaticMapDot color={Theme.colors.passengerMap} size={24} />
           </SafeMarker>
         ) : (
           <SafeMarker
@@ -435,7 +431,7 @@ function MapCanvas({
             tracksViewChanges={false}
             zIndex={200}>
             <PulsingMapMarker
-              color="#2563EB"
+              color={Theme.colors.passengerMap}
               size={36}
               icon="person"
               label="YOU"
@@ -583,12 +579,12 @@ export default function LiveRouteMap({
             </View>
             <View style={styles.legendDivider} />
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: Theme.colors.passenger }]} />
+              <View style={[styles.legendDot, { backgroundColor: Theme.colors.mateMap }]} />
               <Text style={styles.legendText}>Trotro</Text>
             </View>
             <View style={styles.legendDivider} />
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#2563EB' }]} />
+              <View style={[styles.legendDot, { backgroundColor: Theme.colors.passengerMap }]} />
               <Text style={styles.legendText}>You</Text>
             </View>
           </View>
@@ -799,10 +795,10 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   calloutLabel: { color: Theme.colors.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  calloutRoute: { color: '#F9FAFB', fontSize: 14, fontWeight: '800' },
-  calloutMeta: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
+  calloutRoute: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  calloutMeta: { color: '#E0E0E0', fontSize: 12, fontWeight: '600' },
   calloutPlate: {
-    color: '#F9FAFB',
+    color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 1,
@@ -812,7 +808,7 @@ const styles = StyleSheet.create({
   calloutSeats: { color: Theme.colors.success, fontSize: 12, fontWeight: '700', marginTop: 4 },
   yourRideBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(249,115,22,0.18)',
+    backgroundColor: 'rgba(243,111,33,0.18)',
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -820,7 +816,7 @@ const styles = StyleSheet.create({
   },
   yourRideBadgeText: { color: Theme.colors.mate, fontSize: 10, fontWeight: '800' },
 
-  fullscreen: { flex: 1, backgroundColor: '#0C0C0C' },
+  fullscreen: { flex: 1, backgroundColor: '#121212' },
   fullscreenHeader: {
     flexDirection: 'row',
     alignItems: 'center',

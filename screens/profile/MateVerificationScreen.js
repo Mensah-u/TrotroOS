@@ -30,7 +30,7 @@ export default function MateVerificationScreen({ navigation }) {
     if (next) {
       Alert.alert(
         `Mark ${step.label.toLowerCase()} as submitted?`,
-        'A team member will review your document. Marking it as submitted here is a draft until backend KYC is live.',
+        'Your documents will be sent for review. Verified mates get a badge on Find Ride.',
         [
           { text: 'Cancel', style: 'cancel' },
           {

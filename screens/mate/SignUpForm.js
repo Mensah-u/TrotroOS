@@ -12,12 +12,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FormInput } from '@/components/FormInput';
+import VehicleTypePicker from '@/components/VehicleTypePicker';
 import { SCREEN_SCROLL_BOTTOM } from '@/constants/layout';
 import { formatRoute, routes } from '@/constants/routes';
+import { DEFAULT_VEHICLE_TYPE } from '@/constants/vehicleTypes';
+import { Theme } from '@/constants/theme';
 import { signInMate, signUpMate, upsertMateProfile } from '@/services/supabase';
 import { formatSupabaseError } from '@/utils/supabaseErrors';
-
-const VEHICLE_TYPES = ['Trotro', 'Bus'];
 
 export default function SignUpForm({ onSuccess, onSwitchToLogin, onBack }) {
   const [email, setEmail] = useState('');
@@ -25,7 +26,7 @@ export default function SignUpForm({ onSuccess, onSwitchToLogin, onBack }) {
   const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [vehicleRegistration, setVehicleRegistration] = useState('');
-  const [vehicleType, setVehicleType] = useState('Trotro');
+  const [vehicleType, setVehicleType] = useState(DEFAULT_VEHICLE_TYPE);
   const [defaultRouteId, setDefaultRouteId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -120,7 +121,7 @@ export default function SignUpForm({ onSuccess, onSwitchToLogin, onBack }) {
           keyboardShouldPersistTaps="handled">
           {onBack ? (
             <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
-              <Ionicons name="chevron-back" size={22} color="#F9FAFB" />
+              <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
               <Text style={styles.backText}>Choose role</Text>
             </Pressable>
           ) : null}
@@ -175,31 +176,11 @@ export default function SignUpForm({ onSuccess, onSwitchToLogin, onBack }) {
           />
 
           <Text style={styles.sectionLabel}>Vehicle Type</Text>
-          <View style={styles.segmentRow}>
-            {VEHICLE_TYPES.map((type) => {
-              const isSelected = vehicleType === type;
-              return (
-                <Pressable
-                  key={type}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: isSelected }}
-                  onPress={() => setVehicleType(type)}
-                  style={({ pressed }) => [
-                    styles.segment,
-                    isSelected && styles.segmentSelected,
-                    pressed && styles.pressedOpacity,
-                  ]}>
-                  <Text
-                    style={[
-                      styles.segmentText,
-                      isSelected && styles.segmentTextSelected,
-                    ]}>
-                    {type}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <VehicleTypePicker
+            value={vehicleType}
+            onChange={setVehicleType}
+            variant="signup"
+          />
 
           <Text style={styles.sectionLabel}>Default Route (optional)</Text>
           <View style={styles.routeList}>
@@ -280,7 +261,7 @@ export default function SignUpForm({ onSuccess, onSwitchToLogin, onBack }) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#1E1E1E',
   },
   flex1: {
     flex: 1,
@@ -297,20 +278,20 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     alignSelf: 'flex-start',
   },
-  backText: { color: '#9CA3AF', fontSize: 15, fontWeight: '600' },
+  backText: { color: '#E0E0E0', fontSize: 15, fontWeight: '600' },
   heading: {
     color: '#FFFFFF',
     fontSize: 26,
     fontWeight: '800',
   },
   subheading: {
-    color: '#9CA3AF',
+    color: '#E0E0E0',
     fontSize: 14,
     marginTop: 6,
     marginBottom: 20,
   },
   sectionLabel: {
-    color: '#9CA3AF',
+    color: '#E0E0E0',
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -327,18 +308,18 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 50,
     borderRadius: 8,
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#1E1E1E',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: 'transparent',
   },
   segmentSelected: {
-    borderColor: '#E67E22',
+    borderColor: '#F36F21',
     backgroundColor: '#3A2A1A',
   },
   segmentText: {
-    color: '#E5E7EB',
+    color: '#E0E0E0',
     fontSize: 15,
     fontWeight: '600',
   },
@@ -350,7 +331,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   routeRow: {
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#1E1E1E',
     borderRadius: 8,
     paddingHorizontal: 16,
     minHeight: 50,
@@ -359,11 +340,11 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   routeRowSelected: {
-    borderColor: '#E67E22',
+    borderColor: '#F36F21',
     backgroundColor: '#3A2A1A',
   },
   routeRowText: {
-    color: '#E5E7EB',
+    color: '#E0E0E0',
     fontSize: 15,
     fontWeight: '600',
   },
@@ -371,7 +352,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   primaryButton: {
-    backgroundColor: '#E67E22',
+    backgroundColor: '#F36F21',
     borderRadius: 8,
     minHeight: 50,
     alignItems: 'center',
@@ -379,7 +360,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   primaryButtonDisabled: {
-    backgroundColor: '#4B5563',
+    backgroundColor: '#A8A8A8',
   },
   primaryButtonText: {
     color: '#FFFFFF',
@@ -395,15 +376,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   switchLinkText: {
-    color: '#9CA3AF',
+    color: '#E0E0E0',
     fontSize: 14,
   },
   switchLinkTextAccent: {
-    color: '#E67E22',
+    color: '#F36F21',
     fontWeight: '700',
   },
   error: {
-    color: '#F87171',
+    color: Theme.colors.error,
     fontSize: 14,
     marginVertical: 8,
   },

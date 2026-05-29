@@ -73,7 +73,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: Theme.colors.mateSoft,
     borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.25)',
+    borderColor: 'rgba(243,111,33,0.25)',
   },
   iconBox: {
     alignItems: 'center',

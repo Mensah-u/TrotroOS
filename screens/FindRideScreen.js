@@ -7,6 +7,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -23,10 +24,16 @@ import RouteRideCard from '@/components/passenger/RouteRideCard';
 import RoutePlanner from '@/components/RoutePlanner';
 import PassengerProblemBanner from '@/components/passenger/PassengerProblemBanner';
 import { PASSENGER } from '@/constants/problemSolution';
-import { findRouteByPlaces, formatRoute, getPlaceCoords, getRouteFare, routes } from '@/constants/routes';
+import { findRouteByPlaces, formatRoute, getPlaceCoords, getRouteFare, getPickupStopsForRoute, routes } from '@/constants/routes';
+import { filterLaunchRoutes } from '@/constants/corridor';
+import { VEHICLE_TYPES, vehicleMatchesFilter } from '@/constants/vehicleTypes';
 import { tripMatchesRoute } from '@/utils/routeMatching';
 import { TAB_BAR_CLEARANCE, TAB_FOOTER_CLEARANCE, SCREEN_GUTTER } from '@/constants/layout';
 import { Theme } from '@/constants/theme';
+import { useI18n } from '@/context/I18nContext';
+import { consumePendingRidePrefill } from '@/services/deepLinkStore';
+import { buildRouteShareUrl } from '@/services/shareLinks';
+import { getDefaultFavoriteRoute } from '@/services/favoriteRoutes';
 import { summarizeRoutePickup } from '@/utils/rideEta';
 import { getEta } from '@/services/etaService';
 import { bboxKey } from '@/utils/geo';
@@ -57,24 +64,7 @@ import {
   upsertPassengerLocation,
 } from '@/services/supabase';
 import { buildDemandFromLocations } from '@/utils/passengerDemand';
-
-// ─── Design tokens ────────────────────────────────────────────────────────────
-const C = {
-  BG:           '#0C0C0C',
-  SURFACE:      '#161616',
-  SURFACE_UP:   '#1E1E1E',
-  BORDER:       'rgba(255,255,255,0.07)',
-  ACCENT:       '#F97316',
-  ACCENT_SOFT:  'rgba(249,115,22,0.14)',
-  SUCCESS:      '#22C55E',
-  SUCCESS_SOFT: 'rgba(34,197,94,0.12)',
-  WARN:         '#EAB308',
-  DANGER:       '#EF4444',
-  FULL:         '#7F1D1D',
-  TEXT:         '#F9FAFB',
-  TEXT_SUB:     '#9CA3AF',
-  TEXT_MUTED:   '#4B5563',
-};
+import { C } from '@/constants/theme';
 
 const DEMAND_POLL_MS = 5000;
 /** Radius (km) for nearby vehicle / passenger / demand queries. */
@@ -126,8 +116,10 @@ function formatCountdown(expiresAt) {
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function FindRideScreen({ navigation }) {
   const route = useRoute();
+  const { t } = useI18n();
   const [fromPlace,             setFromPlace]             = useState(null);
   const [toPlace,               setToPlace]               = useState(null);
+  const [pickupStop,            setPickupStop]            = useState(null);
   const [rideSheet,           setRideSheet]           = useState(null);
   const [liveDrivers,         setLiveDrivers]         = useState([]);
   const [liveTrips,           setLiveTrips]           = useState([]);
@@ -140,6 +132,7 @@ export default function FindRideScreen({ navigation }) {
   const [countdown,           setCountdown]           = useState('');
   const [queuedRouteLabel,    setQueuedRouteLabel]    = useState(null);
   const [selectedTripId,      setSelectedTripId]      = useState(null);
+  const [vehicleFilter,       setVehicleFilter]       = useState(null);
 
   const [demandByRoute,  setDemandByRoute] = useState({});
   const [mateAverages,   setMateAverages]  = useState({});
@@ -176,8 +169,41 @@ export default function FindRideScreen({ navigation }) {
       if (!mountedRef.current) return;
       setDeviceId(id);
       await ensurePassengerProfileExists(id).catch(() => {});
+
+      const fav = await getDefaultFavoriteRoute().catch(() => null);
+      if (fav && !route.params?.prefillFrom && !route.params?.prefillTo) {
+        const r = routes.find((x) => x.id === fav.routeId);
+        if (r) {
+          setFromPlace(r.origin);
+          setToPlace(r.destination);
+        }
+      }
     })();
   }, []);
+
+  useEffect(() => {
+    const from = route.params?.prefillFrom;
+    const to = route.params?.prefillTo;
+    if (from) setFromPlace(from);
+    if (to) setToPlace(to);
+    if (from || to) navigation.setParams({ prefillFrom: undefined, prefillTo: undefined });
+  }, [route.params?.prefillFrom, route.params?.prefillTo, navigation]);
+
+  useEffect(() => {
+    const pending = consumePendingRidePrefill();
+    if (pending?.from) setFromPlace(pending.from);
+    if (pending?.to) setToPlace(pending.to);
+  }, []);
+
+  const activeRoute = useMemo(
+    () => findRouteByPlaces(fromPlace, toPlace),
+    [fromPlace, toPlace],
+  );
+  const pickupStops = useMemo(
+    () => (activeRoute ? getPickupStopsForRoute(activeRoute) : []),
+    [activeRoute],
+  );
+  const launchRoutes = useMemo(() => filterLaunchRoutes(routes), []);
 
   const isTrackingReserved = !!activeReservationId && !!reservedTrip;
   const showRouteResults = Boolean(debouncedRouteLabel) || isTrackingReserved;
@@ -396,8 +422,11 @@ export default function FindRideScreen({ navigation }) {
         matchedMateIds.add(trip.mateId);
       }
     }
+    if (vehicleFilter) {
+      return matched.filter((t) => vehicleMatchesFilter(t.vehicleType, vehicleFilter));
+    }
     return matched;
-  }, [showRouteResults, fromPlace, toPlace, liveTrips, liveDrivers]);
+  }, [showRouteResults, fromPlace, toPlace, liveTrips, liveDrivers, vehicleFilter]);
 
   const enrichedTrips = useMemo(() => {
     if (!fromPlace || !toPlace) return [];
@@ -436,6 +465,7 @@ export default function FindRideScreen({ navigation }) {
 
   useEffect(() => {
     setSelectedTripId(null);
+    setVehicleFilter(null);
   }, [fromPlace, toPlace]);
 
   useEffect(() => {
@@ -527,6 +557,7 @@ export default function FindRideScreen({ navigation }) {
           deviceId, resId,
           passengerCoords.latitude, passengerCoords.longitude,
           trip.routeLabel,
+          pickupStop ?? fromPlace,
         ).catch(() => {});
       }
     } finally {
@@ -553,6 +584,7 @@ export default function FindRideScreen({ navigation }) {
         deviceId, null,
         passengerCoords.latitude, passengerCoords.longitude,
         routeLabel,
+        pickupStop ?? fromPlace,
       ).catch(() => {});
     }
     await restartBroadcast(null, routeLabel);
@@ -591,9 +623,23 @@ export default function FindRideScreen({ navigation }) {
   const handleEditRoute = useCallback(() => {
     setFromPlace(null);
     setToPlace(null);
+    setPickupStop(null);
     setSelectedTripId(null);
     setRideSheet(null);
   }, []);
+
+  const shareRoute = useCallback(async () => {
+    if (!fromPlace || !toPlace) return;
+    const url = buildRouteShareUrl(fromPlace, toPlace, deviceId?.slice(0, 8));
+    try {
+      await Share.share({
+        message: `Join me on TrotroOS: ${fromPlace} → ${toPlace}\n${url}`,
+        title: t('shareTrip'),
+      });
+    } catch {
+      // cancelled
+    }
+  }, [fromPlace, toPlace, deviceId, t]);
 
   return (
     <PremiumBackground variant="passenger">
@@ -605,6 +651,57 @@ export default function FindRideScreen({ navigation }) {
           variant="passenger"
           liveCount={fromPlace && toPlace ? displayTrips.length : liveTrips.length}
         />
+
+        {!showRouteResults ? (
+          <View style={styles.corridorBanner}>
+            <Ionicons name="location" size={14} color={Theme.colors.passenger} />
+            <Text style={styles.corridorText}>{t('corridorBanner')}</Text>
+          </View>
+        ) : null}
+
+        {fromPlace && toPlace ? (
+          <Pressable onPress={shareRoute} style={styles.shareRow}>
+            <Ionicons name="share-social-outline" size={16} color={Theme.colors.passenger} />
+            <Text style={styles.shareText}>{t('shareTrip')}</Text>
+          </Pressable>
+        ) : null}
+
+        {showRouteResults && pickupStops.length ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stopsScroll} contentContainerStyle={styles.stopsContent}>
+            {pickupStops.map((stop) => (
+              <Pressable
+                key={stop}
+                onPress={() => setPickupStop(stop)}
+                style={[styles.stopChip, pickupStop === stop && styles.stopChipActive]}>
+                <Text style={[styles.stopChipText, pickupStop === stop && styles.stopChipTextActive]}>{stop}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
+
+        {showRouteResults ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.stopsScroll}
+            contentContainerStyle={styles.stopsContent}>
+            <Pressable
+              onPress={() => setVehicleFilter(null)}
+              style={[styles.stopChip, !vehicleFilter && styles.stopChipActive]}>
+              <Text style={[styles.stopChipText, !vehicleFilter && styles.stopChipTextActive]}>All transport</Text>
+            </Pressable>
+            {VEHICLE_TYPES.map((type) => (
+              <Pressable
+                key={type.id}
+                onPress={() => setVehicleFilter(type.label)}
+                style={[styles.stopChip, vehicleFilter === type.label && styles.stopChipActive]}>
+                <Text style={[styles.stopChipText, vehicleFilter === type.label && styles.stopChipTextActive]}>
+                  {type.label}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
 
       {isTrackingReserved ? (
         <Pressable
@@ -655,7 +752,7 @@ export default function FindRideScreen({ navigation }) {
               : 'In queue · sharing location'}
           </Text>
           <Pressable onPress={clearReservation} hitSlop={10}>
-            <Ionicons name="close-circle" size={18} color="#F87171" />
+            <Ionicons name="close-circle" size={18} color={C.DANGER} />
           </Pressable>
         </View>
       ) : null}
@@ -915,6 +1012,42 @@ const styles = StyleSheet.create({
   statusPillDot:  { width: 7, height: 7, borderRadius: 4, backgroundColor: C.SUCCESS },
   statusPillText: { flex: 1, color: '#86efac', fontSize: 12, fontWeight: '600' },
 
+  corridorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: SCREEN_GUTTER,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(243,111,33,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(243,111,33,0.2)',
+  },
+  corridorText: { color: Theme.colors.passenger, fontSize: 12, fontWeight: '700', flex: 1 },
+  shareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginHorizontal: SCREEN_GUTTER,
+    marginBottom: 8,
+  },
+  shareText: { color: Theme.colors.passenger, fontSize: 13, fontWeight: '700' },
+  stopsScroll: { maxHeight: 44, marginBottom: 8 },
+  stopsContent: { paddingHorizontal: SCREEN_GUTTER, gap: 8 },
+  stopChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: C.SURFACE,
+    borderWidth: 1,
+    borderColor: C.BORDER,
+  },
+  stopChipActive: { borderColor: Theme.colors.passenger, backgroundColor: 'rgba(243,111,33,0.12)' },
+  stopChipText: { color: C.TEXT_SUB, fontSize: 12, fontWeight: '600' },
+  stopChipTextActive: { color: Theme.colors.passenger },
+
   trackingCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1087,7 +1220,7 @@ const styles = StyleSheet.create({
   mateBadges:      { flexDirection: 'row', gap: 6 },
   vehicleTypePill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: C.BORDER },
   vehicleTypeText: { color: C.TEXT_SUB, fontSize: 11, fontWeight: '600' },
-  platePill:       { backgroundColor: '#0C0C0C', borderRadius: 6, paddingHorizontal: 9, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  platePill:       { backgroundColor: '#121212', borderRadius: 6, paddingHorizontal: 9, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
   plateText:       { color: C.TEXT, fontSize: 11.5, fontWeight: '800', letterSpacing: 1.2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
 
   cardBottomRow:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -1141,7 +1274,7 @@ const styles = StyleSheet.create({
   modalMateLabel:   { color: C.TEXT_MUTED, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
   modalMateName:    { color: C.TEXT, fontSize: 15, fontWeight: '800', marginTop: 2 },
   modalVehicleType: { color: C.TEXT_SUB, fontSize: 12, fontWeight: '500', marginTop: 1 },
-  modalPlate:       { backgroundColor: '#0C0C0C', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  modalPlate:       { backgroundColor: '#121212', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
   modalPlateText:   { color: C.TEXT, fontSize: 13, fontWeight: '800', letterSpacing: 1.2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
 
   modalMeta:        { gap: 12, marginBottom: 24 },

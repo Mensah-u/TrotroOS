@@ -6,14 +6,20 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import * as Linking from 'expo-linking';
 import { useEffect } from 'react';
 import { Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import BrandedLoader from './components/BrandedLoader';
+import { I18nProvider } from './context/I18nContext';
 import { loadStaticData, refreshStaticData } from './services/staticData';
 import { recordEvent, recordError, initMonitoring } from './services/monitoring';
+import { parseAppDeepLink } from './services/shareLinks';
+import { setPendingRidePrefill } from './services/deepLinkStore';
+import { flushOfflineQueue } from './services/offlineQueue';
+import { upsertPassengerLocation } from './services/supabase';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AppSessionContext, useAppSession } from './context/AppSessionContext';
 import { useAppSessionState } from './hooks/useAppSessionState';
@@ -47,6 +53,9 @@ import PrivacyScreen from './screens/profile/PrivacyScreen';
 import DataPrivacyScreen from './screens/profile/DataPrivacyScreen';
 import PrivacyPolicyScreen from './screens/profile/PrivacyPolicyScreen';
 import SafetyScreen from './screens/profile/SafetyScreen';
+import SafetyReportScreen from './screens/profile/SafetyReportScreen';
+import ScheduledRideScreen from './screens/profile/ScheduledRideScreen';
+import AdminDashboardScreen from './screens/profile/AdminDashboardScreen';
 import SavedPlacesScreen from './screens/profile/SavedPlacesScreen';
 import SupportScreen from './screens/profile/SupportScreen';
 import TermsScreen from './screens/profile/TermsScreen';
@@ -69,7 +78,7 @@ function floatingTabBar(accent) {
     bottom: Platform.OS === 'ios' ? 26 : 14,
     height: 68,
     borderRadius: 22,
-    backgroundColor: 'rgba(14,14,14,0.94)',
+    backgroundColor: 'rgba(18,18,18,0.94)',
     borderTopWidth: 0,
     borderWidth: 1,
     borderColor: Theme.colors.borderStrong,
@@ -115,6 +124,9 @@ function MateAccountStack() {
       <MateStack.Screen name="DataPrivacy" component={DataPrivacyScreen} />
       <MateStack.Screen name="MateInsights" component={MateInsightsScreen} />
       <MateStack.Screen name="MateVerification" component={MateVerificationScreen} />
+      <MateStack.Screen name="ScheduledRide" component={ScheduledRideScreen} />
+      <MateStack.Screen name="SafetyReport" component={SafetyReportScreen} />
+      <MateStack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
       <MateStack.Screen name="EmergencyContact" component={EmergencyContactScreen} />
       <MateStack.Screen name="Language" component={LanguageScreen} />
       <MateStack.Screen name="InviteFriends" component={InviteFriendsScreen} />
@@ -141,6 +153,7 @@ function ProfileTabStack() {
       <ProfileStack.Screen name="DataPrivacy" component={DataPrivacyScreen} />
       <ProfileStack.Screen name="SavedPlaces" component={SavedPlacesScreen} />
       <ProfileStack.Screen name="FavoriteRoutes" component={FavoriteRoutesScreen} />
+      <ProfileStack.Screen name="ScheduledRide" component={ScheduledRideScreen} />
       <ProfileStack.Screen name="EmergencyContact" component={EmergencyContactScreen} />
       <ProfileStack.Screen name="Language" component={LanguageScreen} />
       <ProfileStack.Screen name="InviteFriends" component={InviteFriendsScreen} />
@@ -148,6 +161,8 @@ function ProfileTabStack() {
       <ProfileStack.Screen name="Support" component={SupportScreen} />
       <ProfileStack.Screen name="Feedback" component={FeedbackScreen} />
       <ProfileStack.Screen name="Safety" component={SafetyScreen} />
+      <ProfileStack.Screen name="SafetyReport" component={SafetyReportScreen} />
+      <ProfileStack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
       <ProfileStack.Screen name="Terms" component={TermsScreen} />
       <ProfileStack.Screen name="About" component={AboutScreen} />
     </ProfileStack.Navigator>
@@ -239,6 +254,29 @@ function AppRoot() {
     recordEvent('app_boot');
     loadStaticData().catch((e) => recordError(e, { where: 'loadStaticData' }));
     refreshStaticData().catch((e) => recordError(e, { where: 'refreshStaticData' }));
+    flushOfflineQueue({
+      passenger_location: async (payload) => {
+        const { error } = await upsertPassengerLocation(
+          payload.deviceId,
+          payload.reservationId,
+          payload.latitude,
+          payload.longitude,
+          payload.queuedRoute,
+          payload.pickupStop,
+        );
+        return !error;
+      },
+    }).catch(() => {});
+
+    const handleUrl = (url) => {
+      const parsed = parseAppDeepLink(url);
+      if (parsed?.type === 'ride' && (parsed.from || parsed.to)) {
+        setPendingRidePrefill({ from: parsed.from, to: parsed.to, ref: parsed.ref });
+      }
+    };
+    Linking.getInitialURL().then((url) => url && handleUrl(url)).catch(() => {});
+    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    return () => sub.remove();
   }, []);
 
   useEffect(() => {
@@ -285,12 +323,14 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ErrorBoundary>
-          <AppSessionContext.Provider value={session}>
-            <NavigationContainer>
-              <StatusBar style="light" />
-              <AppRoot />
-            </NavigationContainer>
-          </AppSessionContext.Provider>
+          <I18nProvider>
+            <AppSessionContext.Provider value={session}>
+              <NavigationContainer>
+                <StatusBar style="light" />
+                <AppRoot />
+              </NavigationContainer>
+            </AppSessionContext.Provider>
+          </I18nProvider>
         </ErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -8,7 +8,7 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
  */
 export default function MapClusterMarker({
   count,
-  color = '#F97316',
+  color = '#F36F21',
   textColor = '#FFFFFF',
 }) {
   const breathe = useRef(new Animated.Value(0)).current;

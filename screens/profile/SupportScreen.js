@@ -15,8 +15,8 @@ import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { Theme } from '@/constants/theme';
 
 const C = {
-  BG: '#0C0C0C', SURFACE: '#161616', BORDER: 'rgba(255,255,255,0.07)',
-  ACCENT: '#F97316', TEXT: '#F9FAFB', TEXT_SUB: '#9CA3AF', TEXT_MUTED: '#4B5563',
+  BG: '#121212', SURFACE: '#1E1E1E', BORDER: 'rgba(255,255,255,0.07)',
+  ACCENT: '#F36F21', TEXT: '#FFFFFF', TEXT_SUB: '#E0E0E0', TEXT_MUTED: '#A8A8A8',
 };
 
 const FAQ = [
@@ -95,14 +95,14 @@ export default function SupportScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.BG },
   content: { padding: 20, paddingBottom: TAB_BAR_CLEARANCE },
-  contactCard: { backgroundColor: C.SURFACE, borderRadius: 16, padding: 20, marginBottom: 24, borderWidth: 1, borderColor: 'rgba(249,115,22,0.3)' },
+  contactCard: { backgroundColor: C.SURFACE, borderRadius: 16, padding: 20, marginBottom: 24, borderWidth: 1, borderColor: 'rgba(243,111,33,0.3)' },
   contactHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 },
   contactTitle: { color: C.TEXT, fontSize: 18, fontWeight: '800' },
   contactSub: { color: C.TEXT_SUB, fontSize: 13, marginBottom: 6 },
   contactHours: { color: C.TEXT_MUTED, fontSize: 12, marginBottom: 16 },
   phoneBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: C.ACCENT, borderRadius: 14, minHeight: 52, marginBottom: 10 },
   phoneText: { color: '#FFFFFF', fontSize: 18, fontWeight: '800', letterSpacing: 0.5 },
-  smsBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 14, minHeight: 48, borderWidth: 1, borderColor: 'rgba(249,115,22,0.5)' },
+  smsBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 14, minHeight: 48, borderWidth: 1, borderColor: 'rgba(243,111,33,0.5)' },
   smsText: { color: C.ACCENT, fontSize: 15, fontWeight: '700' },
   sectionLabel: { color: C.TEXT_MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 10 },
   faqCard: { backgroundColor: C.SURFACE, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: C.BORDER },

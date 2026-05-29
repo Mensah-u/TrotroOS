@@ -14,19 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { formatRoute, routes } from '@/constants/routes';
 import { getMateEarningsLog, getMateEarningsTotal } from '@/services/mateEarnings';
-
-const C = {
-  BG: '#0C0C0C',
-  SURFACE: '#161616',
-  SURFACE_UP: '#1E1E1E',
-  BORDER: 'rgba(255,255,255,0.07)',
-  ACCENT: '#F97316',
-  ACCENT_SOFT: 'rgba(249,115,22,0.14)',
-  SUCCESS: '#22C55E',
-  TEXT: '#F9FAFB',
-  TEXT_SUB: '#9CA3AF',
-  TEXT_MUTED: '#4B5563',
-};
+import { C } from '@/constants/theme';
 
 const SUPPORT_PHONE = '+233256238825';
 
