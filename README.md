@@ -1,50 +1,197 @@
-# Welcome to your Expo app 👋
+# TrotroOS
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+**Real-time shared transport for Kumasi, Ghana.**
 
-## Get started
+TrotroOS connects passengers with trotro mates (drivers) on live routes across Kumasi. Passengers find nearby vehicles, reserve seats, and track trips on a live map. Mates broadcast their location, manage demand queues, and depart when ready.
 
-1. Install dependencies
+| | |
+|---|---|
+| **Version** | 1.3.0 |
+| **Platform** | Android (primary), iOS-ready |
+| **Package** | `com.trotro.os` |
+| **Region** | Kumasi — GHS fares, on-board / MoMo payment |
 
-   ```bash
-   npm install
-   ```
+---
 
-2. Start the app
+## Features
 
-   ```bash
-   npx expo start
-   ```
+### For passengers
+- Browse routes and view live vehicle positions on a map
+- Signal **I'm waiting** to join the mate's demand queue
+- Reserve seats and receive trip updates in real time
+- Rate completed trips and manage profile, history, and privacy settings
 
-In the output, you'll find options to open the app in a
+### For mates
+- Sign in with Supabase Auth and manage a driver profile
+- Start trips, broadcast GPS while the app is open, and view waiting passengers
+- **Depart Now** to activate a live trip and sync reservations
+- Dashboard with demand queue and trip controls
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+### Platform
+- Foreground-only location (no background GPS)
+- Supabase Realtime for live map and queue sync
+- Privacy policy, data export, and account deletion flows
+- Play Store release tooling (`check:release`, EAS build scripts)
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+---
 
-## Get a fresh project
+## Tech stack
 
-When you're ready, run:
+| Layer | Technology |
+|-------|------------|
+| Mobile | [Expo SDK 54](https://docs.expo.dev/) · React Native 0.81 · React 19 |
+| Navigation | React Navigation 7 |
+| Backend | [Supabase](https://supabase.com) — Auth, Postgres, Realtime |
+| Maps | react-native-maps · Google Maps (Android) |
+| Build | [EAS Build](https://docs.expo.dev/build/introduction/) |
+
+---
+
+## Prerequisites
+
+- **Node.js** 18+ and npm
+- **Expo Go** on a physical device, or Android Studio for an emulator
+- A **Supabase** project with the schema applied (see [supabase/README.md](./supabase/README.md))
+- A **Google Maps Android API key** restricted to `com.trotro.os`
+
+---
+
+## Getting started
+
+### 1. Clone and install
 
 ```bash
-npm run reset-project
+git clone https://github.com/Mensah-u/TrotroOS.git
+cd TrotroOS
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 2. Configure API keys
 
-## Learn more
+API keys are **not** stored in the public repository. Set them locally using either method below.
 
-To learn more about developing your project with Expo, look at the following resources:
+**Option A — secrets file (recommended for local dev)**
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+cp constants/config.secrets.example.js constants/config.secrets.js
+```
 
-## Join the community
+Edit `constants/config.secrets.js` with your Supabase URL, anon key, and Google Maps key.
 
-Join our community of developers creating universal apps.
+**Option B — environment file**
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+cp .env.example .env
+```
+
+Fill in the `EXPO_PUBLIC_*` variables in `.env`.
+
+Both files are gitignored and will never be committed.
+
+### 3. Set up Supabase
+
+Run the SQL scripts in the [supabase/](./supabase/) folder against your project:
+
+1. **`RUN_THIS_FIRST.sql`** — base schema (required)
+2. **`FIX_passenger_profiles_and_reservations.sql`** — booking fixes
+3. **`FIX_ratings.sql`** — ratings table
+4. **`FIX_mate_depart_now.sql`** — mate trip permissions
+5. **`FIX_live_demand.sql`** — passenger queue / Realtime
+
+See [supabase/README.md](./supabase/README.md) for full details.
+
+In **Authentication → URL Configuration**, add the redirect URL:
+
+```
+trotrops://auth/callback
+```
+
+### 4. Run the app
+
+```powershell
+npm start
+```
+
+Scan the QR code with Expo Go, or press `a` for Android.
+
+| Command | Description |
+|---------|-------------|
+| `npm start` | Start Metro on LAN with QR code (Windows) |
+| `npm run qr` | Reprint QR code |
+| `npm run android` | Open on Android emulator |
+| `npm run lint` | Run ESLint |
+| `npm run check:release` | Pre-flight Play Store checks |
+
+Press **`r`** in the Metro terminal to reload after code changes.
+
+---
+
+## Project structure
+
+```
+TrotroOS/
+├── App.js                 # Root navigation and session bootstrap
+├── screens/               # Passenger, mate, and profile screens
+├── components/          # Shared UI (maps, modals, passenger widgets)
+├── services/              # Supabase client, auth, location, monitoring
+├── hooks/                 # Session and app state hooks
+├── constants/             # Theme, routes, config (secrets gitignored)
+├── supabase/              # SQL migrations and fix scripts
+├── docs/                  # Privacy policy, Play Store, scaling guides
+├── scripts/               # Dev server, release checks, build helpers
+└── server/                # Optional ETA cache and API services
+```
+
+For contributor and AI-agent conventions, see [AGENTS.md](./AGENTS.md).
+
+---
+
+## Configuration
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `EXPO_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anon (public) key |
+| `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY` | Yes | Google Maps key for Android builds |
+| `EXPO_PUBLIC_PRIVACY_POLICY_URL` | Play Store | Hosted privacy policy URL |
+| `EXPO_PUBLIC_SENTRY_DSN` | Optional | Production crash reporting |
+
+For EAS production builds, set these as [EAS secrets](https://docs.expo.dev/build-reference/variables/).
+
+---
+
+## Building for release
+
+```powershell
+npm run check:release    # Verify no blockers before submission
+npm run build:aab        # Production Android App Bundle via EAS
+```
+
+Release checklist and store listing copy: [docs/PLAY_STORE.md](./docs/PLAY_STORE.md).
+
+---
+
+## Security
+
+- Never commit `constants/config.secrets.js` or `.env`
+- Restrict your Google Maps key to package `com.trotro.os` and your release SHA-1
+- Use Supabase Row Level Security (RLS) — policies are defined in the SQL scripts
+- Rotate any keys that were previously exposed in git history
+
+---
+
+## Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS.md](./AGENTS.md) | Architecture, conventions, and known pitfalls |
+| [supabase/README.md](./supabase/README.md) | Database setup and Realtime |
+| [docs/PLAY_STORE.md](./docs/PLAY_STORE.md) | Play Store submission guide |
+| [docs/PRIVACY_POLICY.md](./docs/PRIVACY_POLICY.md) | Privacy policy source |
+| [docs/SCALE_UP.md](./docs/SCALE_UP.md) | Scaling and performance notes |
+
+---
+
+## License
+
+Private project. All rights reserved.
