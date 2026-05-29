@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "trotrops",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": false,
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.trotro.os"

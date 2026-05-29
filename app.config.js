@@ -10,21 +10,33 @@ function loadLocalSecrets() {
   }
 }
 
-function mapsKey() {
-  const fromEnv = process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY?.trim();
+function pick(envKey, secrets, secretKey) {
+  const fromEnv = process.env[envKey]?.trim();
   if (fromEnv) return fromEnv;
-  const secrets = loadLocalSecrets();
-  return secrets.GOOGLE_MAPS_ANDROID_KEY?.trim() ?? '';
+  const fromSecrets = secrets[secretKey]?.trim();
+  return fromSecrets ?? '';
 }
+
+const secrets = loadLocalSecrets();
 
 module.exports = () => ({
   ...base.expo,
+  extra: {
+    ...base.expo.extra,
+    supabaseUrl: pick('EXPO_PUBLIC_SUPABASE_URL', secrets, 'SUPABASE_URL'),
+    supabaseAnonKey: pick('EXPO_PUBLIC_SUPABASE_ANON_KEY', secrets, 'SUPABASE_ANON_KEY'),
+    googleMapsAndroidKey: pick(
+      'EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY',
+      secrets,
+      'GOOGLE_MAPS_ANDROID_KEY',
+    ),
+  },
   android: {
     ...base.expo.android,
     config: {
       ...base.expo.android?.config,
       googleMaps: {
-        apiKey: mapsKey(),
+        apiKey: pick('EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY', secrets, 'GOOGLE_MAPS_ANDROID_KEY'),
       },
     },
   },

@@ -177,7 +177,7 @@ export default function RouteRideCard({
                 onPress={() => onQueue(trip)}
                 style={({ pressed }) => [styles.queueButton, pressed && { opacity: 0.75 }]}>
                 <Ionicons name="time-outline" size={14} color={C.ACCENT} />
-                <Text style={styles.queueButtonText}>I'm Waiting</Text>
+                <Text style={styles.queueButtonText}>{"I'm Waiting"}</Text>
               </Pressable>
             ) : null}
             {!isFull ? (

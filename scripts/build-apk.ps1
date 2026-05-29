@@ -30,15 +30,24 @@ if (-not $projectId) {
 }
 
 Write-Host "`nStarting cloud APK build (preview profile)..." -ForegroundColor Cyan
-Write-Host "This takes ~10-20 minutes. You will get a download link when done.`n"
+Write-Host "Waiting for build to finish — download the APK from the link below (do not wait for emulator install).`n"
 
-npx eas-cli build --platform android --profile preview --non-interactive
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "`nBuild finished! Download your APK from the link above (open on your phone)." -ForegroundColor Green
-    Write-Host "Do NOT wait for 'Downloading app' in the terminal — that tries to push to an emulator and often hangs.`n"
-    Write-Host "Direct install: open the build page in Chrome on your Android phone, tap Download.`n"
-} else {
+$buildJson = npx eas-cli build --platform android --profile preview --non-interactive --wait --json 2>$null
+if ($LASTEXITCODE -ne 0) {
     Write-Host "`nBuild failed. See errors above." -ForegroundColor Red
     exit 1
+}
+
+try {
+    $build = $buildJson | ConvertFrom-Json
+    $url = $build.artifacts.applicationArchiveUrl
+    if ($url) {
+        Write-Host "`nBuild finished!" -ForegroundColor Green
+        Write-Host "Download APK: $url" -ForegroundColor White
+        Write-Host "Open that link on your Android phone in Chrome, then tap Download.`n"
+    } else {
+        Write-Host "`nBuild finished. Open https://expo.dev/accounts/mensah-u/projects/TrotroOSv2/builds for the download link.`n" -ForegroundColor Green
+    }
+} catch {
+    Write-Host "`nBuild finished. Check https://expo.dev for your APK download link.`n" -ForegroundColor Green
 }

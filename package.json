@@ -1,7 +1,15 @@
 {
-  "name": "trotroosv2",
-  "main": "index.js",
+  "name": "trotroos",
   "version": "1.3.0",
+  "description": "Real-time trotro app for Kumasi, Ghana — passengers find rides, mates broadcast trips.",
+  "main": "index.js",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mensah-u/TrotroOS.git"
+  },
+  "author": "Mensah-u",
+  "license": "UNLICENSED",
   "scripts": {
     "start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
     "qr": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/show-qr.ps1",
@@ -12,8 +20,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "check:release": "node scripts/check-release.js",
-    "build:apk": "eas build --platform android --profile preview --non-interactive",
-    "build:apk:interactive": "eas build --platform android --profile preview",
+    "build:apk": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-apk.ps1",
+    "build:apk:eas": "eas build --platform android --profile preview --non-interactive",
     "build:aab": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-aab.ps1",
     "build:aab:eas": "eas build --platform android --profile production --non-interactive"
   },
@@ -57,5 +65,7 @@
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.2"
   },
-  "private": true
+  "engines": {
+    "node": ">=18"
+  }
 }
