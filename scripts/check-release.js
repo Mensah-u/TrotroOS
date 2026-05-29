@@ -21,6 +21,8 @@ const RULES = [
   { re: /TODO:\s*replace\s+before\s+ship/i, msg: 'Unresolved pre-ship TODO' },
   { re: /replace-with-publish-date/i, msg: 'Privacy policy publish date placeholder' },
   { re: /checkout\.stripe\.com/i, msg: 'External Stripe checkout URL' },
+  { re: /AIzaSy[A-Za-z0-9_-]{20,}/, msg: 'Hardcoded Google Maps API key — use .env instead' },
+  { re: /eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/, msg: 'Hardcoded JWT/API key — use .env instead' },
 ];
 
 function walk(dir) {
@@ -33,6 +35,7 @@ function walk(dir) {
 }
 
 function checkFile(file) {
+  if (file.includes('.env.example') || file.includes('server\\api\\.env.example')) return;
   const text = fs.readFileSync(file, 'utf8');
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
