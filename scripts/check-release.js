@@ -35,7 +35,14 @@ function walk(dir) {
 }
 
 function checkFile(file) {
-  if (file.includes('.env.example') || file.includes('server\\api\\.env.example')) return;
+  if (
+    file.includes('.env.example') ||
+    file.includes('server\\api\\.env.example') ||
+    file.includes('config.secrets.example.js') ||
+    file.endsWith('config.secrets.js')
+  ) {
+    return;
+  }
   const text = fs.readFileSync(file, 'utf8');
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {

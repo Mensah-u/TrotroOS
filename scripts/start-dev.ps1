@@ -4,6 +4,16 @@ param([int]$Port = 8081)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot\..
 
+$envFile = Join-Path $PSScriptRoot "..\.env"
+if (Test-Path $envFile) {
+  Get-Content $envFile | ForEach-Object {
+    if ($_ -match '^\s*(#|$)') { return }
+    if ($_ -match '^([^=]+)=(.*)$') {
+      Set-Item -Path "Env:$($matches[1].Trim())" -Value $matches[2].Trim()
+    }
+  }
+}
+
 Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
   Select-Object -ExpandProperty OwningProcess -Unique |
   ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }

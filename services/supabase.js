@@ -3,9 +3,9 @@ import { createClient } from '@supabase/supabase-js';
 import * as Linking from 'expo-linking';
 
 import { SUPABASE_ANON_KEY, SUPABASE_URL, assertClientConfig } from '@/constants/config';
+import { boundingBox, withinBbox } from '@/utils/geo';
 
 assertClientConfig();
-import { boundingBox, withinBbox } from '@/utils/geo';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
