@@ -3,6 +3,7 @@ import * as Crypto from 'expo-crypto';
 
 import {
   getPassengerProfileRemote,
+  setSupabaseDeviceId,
   upsertPassengerProfileRemote,
 } from '@/services/supabase';
 
@@ -76,6 +77,7 @@ export async function getOrCreateDeviceId() {
     id = Crypto.randomUUID();
     await AsyncStorage.setItem(KEYS.DEVICE_ID, id);
   }
+  setSupabaseDeviceId(id);
   return id;
 }
 

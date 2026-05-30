@@ -40,6 +40,11 @@ export const GOOGLE_MAPS_ANDROID_KEY = pick(
   'GOOGLE_MAPS_ANDROID_KEY',
 );
 
+/** Maps JavaScript API — restrict by HTTP referrer (your web domain). Falls back to Android key for local dev. */
+export const GOOGLE_MAPS_WEB_KEY =
+  pick('EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY', 'googleMapsWebKey', 'GOOGLE_MAPS_WEB_KEY')
+  || GOOGLE_MAPS_ANDROID_KEY;
+
 export const ETA_SERVICE_URL = pick('EXPO_PUBLIC_ETA_SERVICE_URL', 'etaServiceUrl', 'ETA_SERVICE_URL');
 
 export const API_BASE_URL = pick('EXPO_PUBLIC_API_BASE_URL', 'apiBaseUrl', 'API_BASE_URL');

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 
+import { getOrCreateDeviceId } from '@/services/passengerProfile';
 import {
   clearAppRole,
   getAppRole,
@@ -9,7 +11,7 @@ import {
   setPassengerOnboarded,
 } from '@/services/appRole';
 import { subscribeToAuthUrls } from '@/services/authDeepLink';
-import { getCurrentMate, getMateSession, signOutMate, supabase } from '@/services/supabase';
+import { getMateSession, signOutMate, supabase } from '@/services/supabase';
 
 export function useAppSessionState() {
   const [phase, setPhase] = useState('loading');
@@ -17,7 +19,11 @@ export function useAppSessionState() {
 
   const bootstrap = useCallback(async () => {
     try {
-      const savedRole = await getAppRole();
+      let savedRole = await getAppRole();
+      if (Platform.OS === 'web' && savedRole === ROLES.MATE) {
+        await setAppRole(ROLES.PASSENGER);
+        savedRole = ROLES.PASSENGER;
+      }
       if (!savedRole) {
         setRole(null);
         setPhase('welcome');
@@ -27,8 +33,8 @@ export function useAppSessionState() {
       setRole(savedRole);
 
       if (savedRole === ROLES.MATE) {
-        const { data } = await getCurrentMate();
-        setPhase(data?.user ? 'app' : 'auth');
+        const { data } = await getMateSession();
+        setPhase(data?.session?.user ? 'app' : 'auth');
         return;
       }
 
@@ -42,11 +48,15 @@ export function useAppSessionState() {
   }, []);
 
   useEffect(() => {
+    getOrCreateDeviceId().catch(() => {});
+  }, []);
+
+  useEffect(() => {
     bootstrap();
 
     const timeout = setTimeout(() => {
       setPhase((current) => (current === 'loading' ? 'welcome' : current));
-    }, 8000);
+    }, 4000);
 
     const advanceMateIfSignedIn = async () => {
       const savedRole = await getAppRole();

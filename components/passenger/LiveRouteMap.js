@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SafeMapView, { canUseNativeMap, SafeCallout, SafeMarker, SafePolyline } from '@/components/SafeMapView';
+import InteractiveWebMap from '@/components/InteractiveWebMap';
+import { GOOGLE_MAPS_WEB_KEY } from '@/constants/config';
 import PulsingMapMarker from '@/components/PulsingMapMarker';
 import MapClusterMarker from '@/components/MapClusterMarker';
 import StaticMapDot from '@/components/StaticMapDot';
@@ -31,6 +33,7 @@ const MAP_INITIAL_REGION = {
 
 /** Animated / nested marker views inside MapView crash Android (addViewAt). */
 const ANDROID_SAFE_MAP = Platform.OS === 'android';
+const USE_WEB_GOOGLE_MAP = Platform.OS === 'web' && Boolean(GOOGLE_MAPS_WEB_KEY?.trim());
 const MARKER_TRACKS_CHANGES = !ANDROID_SAFE_MAP;
 const ANDROID_MARKER_LIMIT = 30;
 
@@ -235,18 +238,6 @@ function MapCanvas({
     if (next) mapRef.current.animateToRegion(next, 350);
   }, [mapRef]);
 
-  const ridePositionsKey = useMemo(
-    () =>
-      ridesOnMap
-        .map((r) =>
-          r.driverCoords
-            ? `${r.id}:${r.driverCoords.latitude?.toFixed(4)},${r.driverCoords.longitude?.toFixed(4)}`
-            : r.id,
-        )
-        .join('|'),
-    [ridesOnMap],
-  );
-
   const lastCameraMoveRef = useRef(0);
   const CAMERA_MIN_INTERVAL_MS = 4000;
 
@@ -299,11 +290,11 @@ function MapCanvas({
     mapRef,
     fromPlace,
     toPlace,
-    passengerCoords?.latitude,
-    passengerCoords?.longitude,
-    reservedDriver?.latitude,
-    reservedDriver?.longitude,
-    ridePositionsKey,
+    passengerCoords,
+    originCoords,
+    destCoords,
+    reservedDriver,
+    ridesOnMap,
     isTrackingReserved,
   ]);
 
@@ -387,6 +378,95 @@ function MapCanvas({
     onClusterPress,
   ]);
 
+  const webMarkers = useMemo(() => {
+    if (!USE_WEB_GOOGLE_MAP) return [];
+    const items = [];
+    if (originCoords) {
+      items.push({
+        id: 'origin',
+        lat: originCoords.latitude,
+        lng: originCoords.longitude,
+        color: Theme.colors.success,
+        scale: 8,
+        title: fromPlace,
+        zIndex: 10,
+      });
+    }
+    if (destCoords) {
+      items.push({
+        id: 'dest',
+        lat: destCoords.latitude,
+        lng: destCoords.longitude,
+        color: Theme.colors.passenger,
+        scale: 8,
+        title: toPlace,
+        zIndex: 10,
+      });
+    }
+    if (passengerCoords) {
+      items.push({
+        id: 'you',
+        lat: passengerCoords.latitude,
+        lng: passengerCoords.longitude,
+        color: Theme.colors.passengerMap,
+        scale: 10,
+        label: 'You',
+        title: 'You',
+        zIndex: 200,
+      });
+    }
+    if (isTrackingReserved && reservedDriver?.latitude != null) {
+      items.push({
+        id: 'reserved',
+        lat: reservedDriver.latitude,
+        lng: reservedDriver.longitude,
+        color: Theme.colors.mateMap,
+        scale: 13,
+        title: reservedTrip?.plate ?? 'Your ride',
+        zIndex: 999,
+      });
+    }
+    for (const ride of ridesOnMap) {
+      if (isTrackingReserved && ride.mateId === reservedTrip?.mateId) continue;
+      if (!ride.driverCoords?.latitude) continue;
+      items.push({
+        id: String(ride.id),
+        lat: ride.driverCoords.latitude,
+        lng: ride.driverCoords.longitude,
+        color: selectedTripId === ride.id ? Theme.colors.passenger : Theme.colors.mateMap,
+        scale: selectedTripId === ride.id ? 12 : 9,
+        title: ride.plate ?? ride.mateName ?? 'Vehicle',
+        zIndex: selectedTripId === ride.id ? 100 : 50,
+        onPress: () => onSelectTrip(ride),
+      });
+    }
+    return items;
+  }, [
+    originCoords,
+    destCoords,
+    passengerCoords,
+    ridesOnMap,
+    isTrackingReserved,
+    reservedDriver,
+    reservedTrip,
+    selectedTripId,
+    fromPlace,
+    toPlace,
+    onSelectTrip,
+  ]);
+
+  if (USE_WEB_GOOGLE_MAP) {
+    return (
+      <InteractiveWebMap
+        ref={mapRef}
+        style={style ?? StyleSheet.absoluteFill}
+        initialRegion={initialRegion}
+        markers={webMarkers}
+        polyline={routeLine}
+      />
+    );
+  }
+
   return (
     <SafeMapView
       ref={mapRef}
@@ -465,7 +545,7 @@ export default function LiveRouteMap({
   const mapRef = useRef(null);
   const fullscreenMapRef = useRef(null);
   const [expanded, setExpanded] = useState(false);
-  const [mapReady, setMapReady] = useState(!ANDROID_SAFE_MAP);
+  const [mapReady, setMapReady] = useState(!ANDROID_SAFE_MAP || USE_WEB_GOOGLE_MAP);
 
   useEffect(() => {
     if (!ANDROID_SAFE_MAP) return;

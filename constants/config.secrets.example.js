@@ -6,4 +6,5 @@ export default {
   SUPABASE_URL: 'https://your-project.supabase.co',
   SUPABASE_ANON_KEY: 'your-supabase-anon-key',
   GOOGLE_MAPS_ANDROID_KEY: 'your-google-maps-android-key',
+  GOOGLE_MAPS_WEB_KEY: 'your-google-maps-javascript-key',
 };

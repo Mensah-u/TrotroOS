@@ -25,10 +25,12 @@ import RouteRideCard from '@/components/passenger/RouteRideCard';
 import RoutePlanner from '@/components/RoutePlanner';
 import PassengerProblemBanner from '@/components/passenger/PassengerProblemBanner';
 import { PASSENGER } from '@/constants/problemSolution';
-import { findRouteByPlaces, formatRoute, getPlaceCoords, getRouteFare, getPickupStopsForRoute, routes } from '@/constants/routes';
+import { findRouteByPlaces, formatRoute, getPlaceCoords, getPickupStopsForRoute, routes } from '@/constants/routes';
 import { filterLaunchRoutes } from '@/constants/corridor';
 import { VEHICLE_TYPES, vehicleMatchesFilter } from '@/constants/vehicleTypes';
-import { tripMatchesRoute } from '@/utils/routeMatching';
+import { driverMatchesRoute, tripMatchesRoute } from '@/utils/routeMatching';
+import { formatTripFare, resolveTripFareGhs } from '@/utils/tripFare';
+import { estimateTripDuration } from '@/utils/rideEta';
 import { TAB_BAR_CLEARANCE, TAB_FOOTER_CLEARANCE, SCREEN_GUTTER } from '@/constants/layout';
 import { Theme } from '@/constants/theme';
 import { useI18n } from '@/context/I18nContext';
@@ -75,11 +77,11 @@ const DEMAND_POLL_MS = 5000;
 const NEARBY_RADIUS_KM = 8;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function tripToCard(t) {
+function tripToCard(t, driver = null) {
   const mate = t.mate_profiles ?? {};
   const routeLabel = t.route ?? `${t.origin} → ${t.destination}`;
-  const routeMatch = routes.find((r) => formatRoute(r) === routeLabel);
-  const fare = getRouteFare(routeMatch);
+  const fareOpts = { driver, allowCatalogFallback: false };
+  const fareGhs = resolveTripFareGhs(t, fareOpts);
   return {
     id: t.id, tripId: t.id,
     mateId:         t.mate_id,
@@ -88,8 +90,8 @@ function tripToCard(t) {
     routeLabel,
     departureTime:  'Live now',
     availableSeats: t.available_seats,
-    fare:           `GHS ${fare}`,
-    fareGhs:        fare,
+    fare:           formatTripFare(t, fareOpts),
+    fareGhs,
     status:         t.status,
     isLive:         true,
     mateName:       mate.full_name ?? null,
@@ -450,6 +452,15 @@ export default function FindRideScreen({ navigation }) {
     [fromPlace, toPlace],
   );
 
+  const routeTripDuration = useMemo(
+    () => estimateTripDuration({
+      origin: fromPlace,
+      destination: toPlace,
+      routeMeta: selectedRouteMeta,
+    }),
+    [fromPlace, toPlace, selectedRouteMeta],
+  );
+
   const pickupCoords = useMemo(() => {
     return passengerCoords ?? getPlaceCoords(fromPlace) ?? selectedRouteMeta?.mapCenter ?? null;
   }, [passengerCoords, fromPlace, selectedRouteMeta]);
@@ -457,13 +468,18 @@ export default function FindRideScreen({ navigation }) {
   const displayReservedTrip = useMemo(() => {
     if (!reservedTrip) return null;
     const live = liveTrips.find((t) => t.id === reservedTrip.tripId);
+    const driver = liveDrivers.find((d) => d.mate_id === (live?.mate_id ?? reservedTrip.mateId));
+    const fareOpts = { driver, allowCatalogFallback: false };
     const base = live ? {
-      ...tripToCard(live),
+      ...tripToCard(live, driver),
       reservationId: reservedTrip.reservationId,
       expiresAt: reservedTrip.expiresAt,
-    } : reservedTrip;
+    } : {
+      ...reservedTrip,
+      fare: formatTripFare(reservedTrip, fareOpts),
+      fareGhs: resolveTripFareGhs(reservedTrip, fareOpts),
+    };
 
-    const driver = liveDrivers.find((d) => d.mate_id === base.mateId);
     const driverCoords = driver
       ? { latitude: driver.latitude, longitude: driver.longitude }
       : null;
@@ -485,20 +501,21 @@ export default function FindRideScreen({ navigation }) {
 
   const displayTrips = useMemo(() => {
     if (!showRouteResults || !fromPlace || !toPlace) return [];
-    const live = liveTrips.map(tripToCard);
-    const matched = live.filter((t) => tripMatchesRoute(t, fromPlace, toPlace));
+    const live = liveTrips.map((row) => {
+      const driver = liveDrivers.find((d) => d.mate_id === row.mate_id);
+      return tripToCard(row, driver);
+    });
 
-    // Also show nearby mates with live GPS even if route labels differ slightly
-    // (common with custom / typed locations).
-    const matchedMateIds = new Set(matched.map((t) => t.mateId));
-    for (const driver of liveDrivers) {
-      if (!driver.latitude || !driver.longitude || matchedMateIds.has(driver.mate_id)) continue;
-      const trip = live.find((t) => t.mateId === driver.mate_id);
-      if (trip && !matchedMateIds.has(trip.mateId)) {
-        matched.push({ ...trip, nearbyOnly: true });
-        matchedMateIds.add(trip.mateId);
-      }
-    }
+    const matched = live.filter((t) => {
+      const raw = liveTrips.find((row) => row.id === t.id);
+      if (!raw || !tripMatchesRoute(raw, fromPlace, toPlace)) return false;
+
+      const driver = liveDrivers.find((d) => d.mate_id === t.mateId);
+      if (driver?.route && !driverMatchesRoute(driver, fromPlace, toPlace)) return false;
+
+      return true;
+    });
+
     if (vehicleFilter) {
       return matched.filter((t) => vehicleMatchesFilter(t.vehicleType, vehicleFilter));
     }
@@ -510,7 +527,10 @@ export default function FindRideScreen({ navigation }) {
 
     return displayTrips
       .map((trip) => {
+        const raw = liveTrips.find((row) => row.id === trip.id);
         const driver = liveDrivers.find((d) => d.mate_id === trip.mateId);
+        const fareOpts = { driver, allowCatalogFallback: false };
+        const fareGhs = resolveTripFareGhs(raw ?? trip, fareOpts);
         const driverCoords = driver
           ? { latitude: driver.latitude, longitude: driver.longitude }
           : null;
@@ -520,7 +540,13 @@ export default function FindRideScreen({ navigation }) {
           routeMeta: selectedRouteMeta,
           availableSeats: trip.availableSeats,
         });
-        return { ...trip, eta, driverCoords };
+        return {
+          ...trip,
+          fareGhs,
+          fare: formatTripFare(raw ?? trip, fareOpts),
+          eta,
+          driverCoords,
+        };
       })
       .sort((a, b) => {
         const aFull = a.availableSeats === 0 ? 1 : 0;
@@ -528,7 +554,7 @@ export default function FindRideScreen({ navigation }) {
         if (aFull !== bFull) return aFull - bFull;
         return (a.eta?.minMinutes ?? 99) - (b.eta?.minMinutes ?? 99);
       });
-  }, [displayTrips, liveDrivers, pickupCoords, selectedRouteMeta, fromPlace, toPlace]);
+  }, [displayTrips, liveTrips, liveDrivers, pickupCoords, selectedRouteMeta, fromPlace, toPlace]);
 
   const visibleEnrichedTrips = useMemo(
     () => enrichedTrips.filter((t) => !dismissedTripIds.has(t.id)),
@@ -1025,7 +1051,9 @@ export default function FindRideScreen({ navigation }) {
               <Text style={styles.emptyTitle}>No mates on this route yet</Text>
               <Text style={styles.emptySubtitle}>
                 Join the queue for {fromPlace} → {toPlace} and mates will see you waiting.
-                {selectedRouteMeta?.pickupEta ? (
+                {routeTripDuration?.label ? (
+                  `\nTypical trip: ${routeTripDuration.label}`
+                ) : selectedRouteMeta?.pickupEta ? (
                   `\nTypical wait: ${selectedRouteMeta.pickupEta.min}–${selectedRouteMeta.pickupEta.max} min`
                 ) : ''}
               </Text>
@@ -1056,6 +1084,7 @@ export default function FindRideScreen({ navigation }) {
             <Text style={styles.chooseBarTitle} numberOfLines={1}>
               {selectedTrip.mateName ?? 'Mate'}
               {selectedTrip.plate ? ` · ${selectedTrip.plate}` : ''}
+              {selectedTrip.fare ? ` · ${selectedTrip.fare}` : ''}
             </Text>
             <View style={styles.chooseBarEta}>
               <Ionicons name="time-outline" size={14} color={Theme.colors.passenger} />

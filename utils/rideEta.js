@@ -1,4 +1,6 @@
-/** Pickup ETA helpers for Kumasi trotro rides. */
+/** Pickup ETA and trip-duration helpers for Kumasi trotro rides. */
+
+import { resolvePlaceCoords } from '@/constants/routes';
 
 const EARTH_RADIUS_KM = 6371;
 
@@ -26,6 +28,59 @@ function minutesForDistance(km, speedKmh) {
   return Math.ceil((km / speedKmh) * 60);
 }
 
+function durationFromDistanceKm(distanceKm, { kind = 'trip' } = {}) {
+  if (distanceKm == null || distanceKm <= 0) return null;
+
+  let minSpeed;
+  let maxSpeed;
+  let stopBufferMin;
+
+  if (distanceKm < 12) {
+    minSpeed = kind === 'pickup' ? SPEED_SLOW_KMH : 14;
+    maxSpeed = kind === 'pickup' ? SPEED_FAST_KMH : 24;
+    stopBufferMin = kind === 'pickup' ? BOARDING_BUFFER_MIN : 5;
+  } else if (distanceKm < 40) {
+    minSpeed = 22;
+    maxSpeed = 38;
+    stopBufferMin = 8;
+  } else if (distanceKm < 100) {
+    minSpeed = 42;
+    maxSpeed = 62;
+    stopBufferMin = 12;
+  } else {
+    minSpeed = 52;
+    maxSpeed = 72;
+    stopBufferMin = 18;
+  }
+
+  let minMinutes = minutesForDistance(distanceKm, maxSpeed) + Math.floor(stopBufferMin / 2);
+  let maxMinutes =
+    minutesForDistance(distanceKm, minSpeed) + stopBufferMin + (kind === 'pickup' ? TRAFFIC_BUFFER_MIN : 0);
+
+  minMinutes = Math.max(2, minMinutes);
+  maxMinutes = Math.max(minMinutes + 2, maxMinutes);
+
+  return {
+    minMinutes,
+    maxMinutes,
+    distanceKm,
+    confidence: 'distance',
+    label: formatEtaRange(minMinutes, maxMinutes),
+  };
+}
+
+function catalogDuration(routeMeta, field) {
+  const block = routeMeta?.[field] ?? routeMeta?.tripEta ?? routeMeta?.pickupEta;
+  if (!block?.min || !block?.max) return null;
+  return {
+    minMinutes: block.min,
+    maxMinutes: block.max,
+    distanceKm: null,
+    confidence: 'catalog',
+    label: formatEtaRange(block.min, block.max),
+  };
+}
+
 /**
  * Estimate when a trotro will reach the passenger at the route origin.
  * Uses live driver GPS when available; falls back to route defaults.
@@ -36,62 +91,91 @@ export function estimatePickupEta({
   routeMeta,
   availableSeats = 1,
 }) {
-  const fallback = routeMeta?.pickupEta ?? { min: 5, max: 15 };
-
-  if (!driverCoords?.latitude || !pickupCoords?.latitude) {
-    return {
-      minMinutes: fallback.min,
-      maxMinutes: fallback.max,
-      distanceKm: null,
-      confidence: 'approx',
-      label: formatEtaRange(fallback.min, fallback.max),
-    };
+  if (driverCoords?.latitude && pickupCoords?.latitude) {
+    const distanceKm = haversineKm(driverCoords, pickupCoords);
+    if (distanceKm != null) {
+      let result = durationFromDistanceKm(distanceKm, { kind: 'pickup' });
+      if (result && availableSeats <= 2) {
+        const maxMinutes = result.maxMinutes + 4;
+        result = {
+          ...result,
+          maxMinutes,
+          label: formatEtaRange(result.minMinutes, maxMinutes),
+        };
+      }
+      if (result) return { ...result, confidence: 'live' };
+    }
   }
 
-  const distanceKm = haversineKm(driverCoords, pickupCoords);
-  if (distanceKm == null) {
-    return {
-      minMinutes: fallback.min,
-      maxMinutes: fallback.max,
-      distanceKm: null,
-      confidence: 'approx',
-      label: formatEtaRange(fallback.min, fallback.max),
-    };
-  }
-
-  let minMinutes = minutesForDistance(distanceKm, SPEED_FAST_KMH) + BOARDING_BUFFER_MIN;
-  let maxMinutes =
-    minutesForDistance(distanceKm, SPEED_SLOW_KMH) + BOARDING_BUFFER_MIN + TRAFFIC_BUFFER_MIN;
-
-  // Nearly full trotros may stop longer to fill seats.
-  if (availableSeats <= 2) {
-    maxMinutes += 4;
-  }
-
-  minMinutes = Math.max(2, minMinutes);
-  maxMinutes = Math.max(minMinutes + 2, maxMinutes);
+  const catalog = catalogDuration(routeMeta, 'pickupEta');
+  if (catalog) return { ...catalog, confidence: 'approx' };
 
   return {
-    minMinutes,
-    maxMinutes,
-    distanceKm,
-    confidence: 'live',
-    label: formatEtaRange(minMinutes, maxMinutes),
+    minMinutes: 5,
+    maxMinutes: 15,
+    distanceKm: null,
+    confidence: 'approx',
+    label: formatEtaRange(5, 15),
   };
 }
 
-/** Full trip duration from origin to destination (for ride details). */
-export function estimateTripDuration(routeMeta) {
-  const trip = routeMeta?.tripEta ?? { min: 12, max: 25 };
+/**
+ * Full trip duration from origin to destination.
+ * Prefers distance from resolved place coords; falls back to catalog tripEta.
+ */
+export function estimateTripDuration({
+  origin,
+  destination,
+  originCoords,
+  destCoords,
+  routeMeta,
+} = {}) {
+  const from = originCoords ?? resolvePlaceCoords(origin);
+  const to = destCoords ?? resolvePlaceCoords(destination);
+
+  if (from?.latitude && to?.latitude) {
+    const distanceKm = haversineKm(from, to);
+    const computed = durationFromDistanceKm(distanceKm, { kind: 'trip' });
+    if (computed) {
+      const catalog = catalogDuration(routeMeta, 'tripEta');
+      if (catalog && routeMeta?.id) {
+        const catalogMid = (catalog.minMinutes + catalog.maxMinutes) / 2;
+        const computedMid = (computed.minMinutes + computed.maxMinutes) / 2;
+        if (Math.abs(catalogMid - computedMid) <= 8) {
+          return { ...catalog, confidence: 'catalog' };
+        }
+      }
+      return computed;
+    }
+  }
+
+  const catalog = catalogDuration(routeMeta, 'tripEta');
+  if (catalog) return catalog;
+
   return {
-    minMinutes: trip.min,
-    maxMinutes: trip.max,
-    label: formatEtaRange(trip.min, trip.max),
+    minMinutes: 12,
+    maxMinutes: 25,
+    distanceKm: null,
+    confidence: 'approx',
+    label: formatEtaRange(12, 25),
   };
+}
+
+function formatDurationPart(totalMinutes) {
+  const mins = Math.max(0, Math.round(totalMinutes));
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.floor(mins / 60);
+  const rem = mins % 60;
+  if (rem === 0) return `${hours} hr`;
+  return `${hours} hr ${rem} min`;
 }
 
 export function formatEtaRange(minMinutes, maxMinutes) {
   if (minMinutes == null || maxMinutes == null) return 'Estimating…';
+  if (minMinutes >= 60 || maxMinutes >= 60) {
+    if (minMinutes === maxMinutes) return `~${formatDurationPart(minMinutes)}`;
+    return `${formatDurationPart(minMinutes)}–${formatDurationPart(maxMinutes)}`;
+  }
   if (minMinutes === maxMinutes) return `~${minMinutes} min`;
   return `${minMinutes}–${maxMinutes} min`;
 }

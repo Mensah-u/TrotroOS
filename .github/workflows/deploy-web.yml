@@ -1,0 +1,28 @@
+name: Build web app
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run build:web
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY }}
+          EXPO_PUBLIC_PRIVACY_POLICY_URL: ${{ secrets.EXPO_PUBLIC_PRIVACY_POLICY_URL }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trotroos-web-dist
+          path: dist/
+          retention-days: 14

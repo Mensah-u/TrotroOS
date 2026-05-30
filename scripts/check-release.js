@@ -132,7 +132,7 @@ try {
 
 if (warnings.length) {
   console.log(`check-release: ${warnings.length} warning(s):`);
-  for (const w of warnings) console.log(` ⚠ ${w}`);
+  for (const w of warnings) console.log(` [WARN] ${w}`);
   console.log('');
 }
 
@@ -143,7 +143,7 @@ if (violations.length === 0) {
 
 console.log(`check-release: ${violations.length} blocker(s):`);
 for (const v of violations) {
-  console.log(` ✗ ${v.file}:${v.line} — ${v.msg}`);
+  console.log(` [FAIL] ${v.file}:${v.line} — ${v.msg}`);
   if (v.snippet) console.log(`     ${v.snippet}`);
 }
 process.exit(1);

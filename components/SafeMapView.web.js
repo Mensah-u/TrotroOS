@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { forwardRef, useImperativeHandle } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { GOOGLE_MAPS_WEB_KEY } from '@/constants/config';
 import { Theme } from '@/constants/theme';
 
 const MAP_REF_STUB = {
@@ -9,9 +10,9 @@ const MAP_REF_STUB = {
   fitToCoordinates: () => {},
 };
 
-/** Web uses list + route cards; native MapView is not available in the browser. */
+/** Interactive Google Maps when EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY is set. */
 export function canUseNativeMap() {
-  return false;
+  return Boolean(GOOGLE_MAPS_WEB_KEY?.trim());
 }
 
 const SafeMapView = forwardRef(function SafeMapView(

@@ -40,6 +40,11 @@ module.exports = () => ({
       secrets,
       'GOOGLE_MAPS_ANDROID_KEY',
     ),
+    googleMapsWebKey: pick(
+      'EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY',
+      secrets,
+      'GOOGLE_MAPS_WEB_KEY',
+    ),
   },
   android: {
     ...base.expo.android,

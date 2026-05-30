@@ -34,6 +34,7 @@ import MateProfileScreen from './screens/MateProfileScreen';
 import PassengerAuthScreen from './screens/passenger/PassengerAuthScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import TripHistoryScreen from './screens/TripHistoryScreen';
+import WebLandingScreen from './screens/web/WebLandingScreen';
 import WelcomeScreen from './screens/WelcomeScreen';
 import EarnScreen from './screens/mate/EarnScreen';
 import AboutScreen from './screens/profile/AboutScreen';
@@ -254,20 +255,6 @@ function AppRoot() {
     initMonitoring();
     recordEvent('app_boot');
     loadStaticData().catch((e) => recordError(e, { where: 'loadStaticData' }));
-    refreshStaticData().catch((e) => recordError(e, { where: 'refreshStaticData' }));
-    flushOfflineQueue({
-      passenger_location: async (payload) => {
-        const { error } = await upsertPassengerLocation(
-          payload.deviceId,
-          payload.reservationId,
-          payload.latitude,
-          payload.longitude,
-          payload.queuedRoute,
-          payload.pickupStop,
-        );
-        return !error;
-      },
-    }).catch(() => {});
 
     const handleUrl = (url) => {
       const parsed = parseAppDeepLink(url);
@@ -277,7 +264,28 @@ function AppRoot() {
     };
     Linking.getInitialURL().then((url) => url && handleUrl(url)).catch(() => {});
     const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
-    return () => sub.remove();
+
+    const idle = setTimeout(() => {
+      refreshStaticData().catch((e) => recordError(e, { where: 'refreshStaticData' }));
+      flushOfflineQueue({
+        passenger_location: async (payload) => {
+          const { error } = await upsertPassengerLocation(
+            payload.deviceId,
+            payload.reservationId,
+            payload.latitude,
+            payload.longitude,
+            payload.queuedRoute,
+            payload.pickupStop,
+          );
+          return !error;
+        },
+      }).catch(() => {});
+    }, 1500);
+
+    return () => {
+      clearTimeout(idle);
+      sub.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -291,10 +299,20 @@ function AppRoot() {
   }
 
   if (session.phase === 'welcome') {
+    if (Platform.OS === 'web') {
+      return <WebLandingScreen onBookRide={() => session.selectRole(ROLES.PASSENGER)} />;
+    }
     return <WelcomeScreen onSelectRole={session.selectRole} />;
   }
 
   if (session.phase === 'auth' && session.role === ROLES.MATE) {
+    if (Platform.OS === 'web') {
+      return (
+        <WebLandingScreen
+          onBookRide={() => session.selectRole(ROLES.PASSENGER)}
+        />
+      );
+    }
     return (
       <MateAuthScreen onSuccess={session.completeAuth} onBack={session.switchRole} />
     );
@@ -307,6 +325,9 @@ function AppRoot() {
   }
 
   if (session.phase === 'app' && session.role === ROLES.MATE) {
+    if (Platform.OS === 'web') {
+      return <PassengerApp />;
+    }
     return <MateApp />;
   }
 
@@ -319,11 +340,15 @@ function AppRoot() {
 
 export default function App() {
   const session = useAppSessionState();
+  const webMarketing =
+    Platform.OS === 'web'
+    && (session.phase === 'welcome'
+      || (session.phase === 'auth' && session.role === ROLES.MATE));
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <WebAppShell>
+        <WebAppShell mode={webMarketing ? 'marketing' : 'app'}>
           <ErrorBoundary>
             <I18nProvider>
               <AppSessionContext.Provider value={session}>

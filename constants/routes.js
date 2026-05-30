@@ -9,6 +9,15 @@ export const placeCoords = {
   'Bantama': { latitude: 6.695, longitude: -1.635 },
   'KNUST Gate': { latitude: 6.676, longitude: -1.568 },
   'Ayeduase Junction': { latitude: 6.680, longitude: -1.555 },
+  // City anchors for intercity / custom routes
+  Kumasi: { latitude: 6.688, longitude: -1.624 },
+  Accra: { latitude: 5.603, longitude: -0.187 },
+  KNUST: { latitude: 6.674, longitude: -1.571 },
+  Suame: { latitude: 6.710, longitude: -1.625 },
+  Tafo: { latitude: 6.718, longitude: -1.592 },
+  Asafo: { latitude: 6.696, longitude: -1.628 },
+  Adum: { latitude: 6.692, longitude: -1.621 },
+  'Kumasi City': { latitude: 6.690, longitude: -1.624 },
 };
 
 /** Named pickup stops (stages) per route corridor. */
@@ -145,6 +154,43 @@ export function findRouteByPlaces(origin, destination) {
 export function getPlaceCoords(place) {
   if (!place) return null;
   return placeCoords[place] ?? null;
+}
+
+function normalizePlaceKey(place) {
+  return String(place ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[^\w\s]/g, '');
+}
+
+/** Resolve map coords for typed or fuzzy place names (e.g. KNUST → campus). */
+export function resolvePlaceCoords(place) {
+  if (!place) return null;
+
+  const direct = getPlaceCoords(place);
+  if (direct) return direct;
+
+  const needle = normalizePlaceKey(place);
+  if (!needle) return null;
+
+  for (const [name, coords] of Object.entries(placeCoords)) {
+    if (normalizePlaceKey(name) === needle) return coords;
+  }
+
+  let best = null;
+  let bestScore = 0;
+  for (const [name, coords] of Object.entries(placeCoords)) {
+    const key = normalizePlaceKey(name);
+    if (needle.includes(key) || key.includes(needle)) {
+      const score = Math.min(needle.length, key.length);
+      if (score > bestScore) {
+        best = coords;
+        bestScore = score;
+      }
+    }
+  }
+  return best;
 }
 
 /** Pickup stops for a route id or origin→destination pair. */

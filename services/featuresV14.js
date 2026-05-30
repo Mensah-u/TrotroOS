@@ -130,35 +130,36 @@ export async function boardReservation(reservationId, mateId) {
 // ─── Admin / analytics aggregates ───────────────────────────────────────────
 
 export async function fetchAdminStats() {
-  const [trips, reports, scheduled, mates] = await Promise.all([
-    supabase.from('trips').select('id', { count: 'exact', head: true }),
-    supabase.from(T.SAFETY).select('id', { count: 'exact', head: true }).eq('status', 'open'),
-    supabase.from(T.SCHEDULED).select('id', { count: 'exact', head: true }).eq('status', 'active'),
-    supabase.from('mate_profiles').select('id', { count: 'exact', head: true }),
-  ]);
+  const { data, error } = await supabase.rpc('admin_dashboard_stats');
+  if (error || data?.ok === false) {
+    return {
+      totalTrips: 0,
+      openReports: 0,
+      scheduledDemand: 0,
+      mateCount: 0,
+      unauthorized: true,
+      error: data?.error ?? error?.message,
+    };
+  }
   return {
-    totalTrips: trips.count ?? 0,
-    openReports: reports.count ?? 0,
-    scheduledDemand: scheduled.count ?? 0,
-    mateCount: mates.count ?? 0,
+    totalTrips: data.totalTrips ?? 0,
+    openReports: data.openReports ?? 0,
+    scheduledDemand: data.scheduledDemand ?? 0,
+    mateCount: data.mateCount ?? 0,
+    unauthorized: false,
   };
 }
 
-export function fetchRecentTripsAdmin(limit = 25) {
-  return supabase
-    .from('trips')
-    .select('id, route, status, available_seats, total_seats, created_at, mate_id')
-    .order('created_at', { ascending: false })
-    .limit(limit);
+export async function fetchRecentTripsAdmin(limit = 25) {
+  const { data, error } = await supabase.rpc('admin_recent_trips', { p_limit: limit });
+  if (error) return { data: [], error };
+  return { data: data ?? [], error: null };
 }
 
-export function fetchOpenSafetyReports(limit = 25) {
-  return supabase
-    .from(T.SAFETY)
-    .select('*')
-    .eq('status', 'open')
-    .order('created_at', { ascending: false })
-    .limit(limit);
+export async function fetchOpenSafetyReports(limit = 25) {
+  const { data, error } = await supabase.rpc('admin_open_safety_reports', { p_limit: limit });
+  if (error) return { data: [], error };
+  return { data: data ?? [], error: null };
 }
 
 export function fetchFleetGroups() {

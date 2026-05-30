@@ -36,9 +36,16 @@ Remove-Item Env:CI -ErrorAction SilentlyContinue
 & "$PSScriptRoot\show-qr.ps1" -Port $Port
 
 Write-Host "Offline mode: skipping Expo dependency check (normal for local dev)." -ForegroundColor DarkGray
-Write-Host "Reload: press r in THIS window — not in a separate PowerShell prompt." -ForegroundColor DarkGray
+Write-Host "Reload: press r once in THIS window (wait for Bundled to finish)." -ForegroundColor DarkGray
+Write-Host "After metro.config.js changes: Ctrl+C then npm start again." -ForegroundColor DarkGray
 Write-Host ""
 
 # Continue on stderr from npx/expo (e.g. offline-mode notice) so Metro keeps running.
 $ErrorActionPreference = 'Continue'
-npx expo start -c --lan --port $Port --offline
+$clearCache = $env:TROTRO_CLEAR_CACHE -eq '1'
+if ($clearCache) {
+  Write-Host "Clearing Metro cache (TROTRO_CLEAR_CACHE=1)..." -ForegroundColor Yellow
+  npx expo start -c --lan --port $Port
+} else {
+  npx expo start --lan --port $Port
+}

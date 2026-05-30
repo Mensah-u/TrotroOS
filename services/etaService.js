@@ -10,7 +10,7 @@
  * Architecture
  * ────────────
  *  ┌──────────────┐    getEta()    ┌──────────────────┐
- *  │  React UI    │ ─────────────▶ │  etaService.js   │
+ *  │  React UI    │ -------------> │  etaService.js   │
  *  └──────────────┘                │  ─ 60s TTL cache │
  *                                  │  ─ key dedupes   │
  *                                  │    in-flight req │

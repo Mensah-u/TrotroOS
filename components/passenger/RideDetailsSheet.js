@@ -68,7 +68,11 @@ export default function RideDetailsSheet({
   const isActive = mode === 'active';
   const isFull = trip.availableSeats === 0 || trip.status === 'full';
   const distanceKm = haversineKm(passengerCoords, driverCoords);
-  const tripDuration = estimateTripDuration(routeMeta);
+  const tripDuration = estimateTripDuration({
+    origin: trip.originStation,
+    destination: trip.destination,
+    routeMeta,
+  });
   const eta = pickupEta ?? trip.eta;
 
   const status = isActive

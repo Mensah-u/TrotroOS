@@ -38,7 +38,7 @@ export function placesMatch(a, b) {
 
 /**
  * Does an active trip match what the passenger searched for?
- * Accepts exact match, fuzzy origin/destination, or matching route label.
+ * Same direction only: origin must align with pickup, destination with where they are going.
  */
 export function tripMatchesRoute(trip, origin, destination) {
   if (!origin || !destination) return false;
@@ -53,29 +53,30 @@ export function tripMatchesRoute(trip, origin, destination) {
   if (normalizeText(tripRoute) === normalizeText(passengerLabel)) return true;
   if (normalizeText(tripRoute) === normalizeText(passengerLabelAlt)) return true;
 
-  if (
+  return (
     placesMatch(tripOrigin, origin) &&
     placesMatch(tripDest, destination)
-  ) {
-    return true;
-  }
+  );
+}
 
-  // Same corridor: at least one endpoint matches and destinations align.
-  if (
-    placesMatch(tripDest, destination) &&
-    (placesMatch(tripOrigin, origin) || placesMatch(tripOrigin, origin))
-  ) {
-    return true;
-  }
+/** Does a live driver broadcast match the passenger's chosen corridor? */
+export function driverMatchesRoute(driver, origin, destination) {
+  if (!origin || !destination || !driver?.route) return true;
+  return routeLabelMatches(driver.route, origin, destination);
+}
 
-  // Reverse direction on the same corridor still counts as relevant nearby service.
-  if (
-    placesMatch(tripOrigin, destination) &&
-    placesMatch(tripDest, origin)
-  ) {
-    return true;
-  }
+/** Match a preformatted route label (e.g. driver_locations.route). */
+export function routeLabelMatches(routeLabel, origin, destination) {
+  if (!routeLabel || !origin || !destination) return false;
+  const passengerLabel = `${origin} → ${destination}`;
+  const passengerLabelAlt = `${origin} - ${destination}`;
+  if (normalizeText(routeLabel) === normalizeText(passengerLabel)) return true;
+  if (normalizeText(routeLabel) === normalizeText(passengerLabelAlt)) return true;
 
+  const [labelFrom, labelTo] = routeLabel.split(/\s[-–—→]\s/);
+  if (labelFrom && labelTo) {
+    return placesMatch(labelFrom, origin) && placesMatch(labelTo, destination);
+  }
   return false;
 }
 

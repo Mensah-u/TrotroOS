@@ -17,7 +17,7 @@ export const STRINGS = {
     scheduledDemand: 'Scheduled demand',
     pushEnabled: 'Push notifications enabled',
     offlineCached: 'Showing cached routes',
-    corridorBanner: 'Live on Tech Junction ↔ KNUST corridor',
+    corridorBanner: 'Live on Tech Junction to KNUST corridor',
     smsInvite: 'SMS invite',
   },
   tw: {
@@ -36,7 +36,7 @@ export const STRINGS = {
     scheduledDemand: 'Bere a wohyɛe',
     pushEnabled: 'Notifications ayɛ adwuma',
     offlineCached: 'Routes a wɔakora no',
-    corridorBanner: 'Tech Junction ↔ KNUST wɔ hɔ',
+    corridorBanner: 'Tech Junction to KNUST wɔ hɔ',
     smsInvite: 'Fa SMS',
   },
 };

@@ -35,7 +35,6 @@ function findRouteIdByLabel(label) {
 export default function MateProfileScreen({ navigation, route }) {
   const { switchRole } = useAppSession();
   const initialProfile = route?.params?.profile ?? null;
-  const [profile, setProfile] = useState(initialProfile);
   const [loading, setLoading] = useState(!initialProfile);
 
   const [fullName, setFullName] = useState(initialProfile?.full_name ?? '');
@@ -65,7 +64,6 @@ export default function MateProfileScreen({ navigation, route }) {
       if (!userData?.user) return;
       const { data } = await getMateProfile(userData.user.id);
       if (!mounted || !data) return;
-      setProfile(data);
       setFullName(data.full_name ?? '');
       setPhoneNumber(data.phone_number ?? '');
       setVehicleRegistration(data.vehicle_registration ?? '');

@@ -44,7 +44,7 @@ import {
   createTrip,
   deleteDriverLocation,
   endTrip as endTripDb,
-  fetchActiveReservationsForTrip,
+  fetchMateTripReservations,
   fetchPassengerLocations,
   fetchTripById,
   getActiveMateTrip,
@@ -52,11 +52,12 @@ import {
   subscribeToReservations,
   subscribeToTripById,
   updateTripDestination,
+  updateTripFare,
   updateTripSeats,
   upsertDriverLocation,
   supabase,
 } from '@/services/supabase';
-import { TAB_BAR_CLEARANCE, TAB_FOOTER_CLEARANCE } from '@/constants/layout';
+import { TAB_FOOTER_CLEARANCE } from '@/constants/layout';
 import { DEFAULT_VEHICLE_TYPE, getSeatLimitsForVehicleType } from '@/constants/vehicleTypes';
 import { getSeatStatus, Theme } from '@/constants/theme';
 import { formatSupabaseError } from '@/utils/supabaseErrors';
@@ -132,6 +133,12 @@ function applyTripRowFromDb(current, row) {
   };
 }
 
+function routeFareGhs(route, persistedFare) {
+  if (persistedFare != null && Number(persistedFare) > 0) return Number(persistedFare);
+  if (route?.fareGhs != null && Number(route.fareGhs) > 0) return Number(route.fareGhs);
+  return getRouteFare(route);
+}
+
 function formatElapsed(ms) {
   const sec = Math.floor(ms / 1000);
   const m = Math.floor(sec / 60);
@@ -141,6 +148,52 @@ function formatElapsed(ms) {
     return `${h}h ${m % 60}m`;
   }
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatReservationCountdown(expiresAt) {
+  if (!expiresAt) return '';
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return 'Expired';
+  const mins = Math.ceil(ms / 60000);
+  return mins <= 1 ? '<1 min left' : `${mins} min left`;
+}
+
+function ReservationsPanel({ reservations, onBoard }) {
+  if (!reservations?.length) return null;
+
+  return (
+    <View style={styles.reservationPanel}>
+      <View style={styles.reservationPanelHeader}>
+        <Ionicons name="bookmark" size={16} color={C.ACCENT} />
+        <Text style={styles.reservationPanelTitle}>
+          {reservations.length} reserved — tap to board
+        </Text>
+      </View>
+      <ScrollView
+        style={styles.reservationPanelScroll}
+        contentContainerStyle={styles.reservationPanelScrollContent}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={false}>
+        {reservations.map((r) => (
+          <Pressable
+            key={r.id}
+            onPress={() => onBoard?.(r.id)}
+            style={({ pressed }) => [styles.reservationRow, pressed && { opacity: 0.85 }]}>
+            <Ionicons name="ticket-outline" size={15} color={C.ACCENT} />
+            <View style={styles.reservationRowBody}>
+              <Text style={styles.reservationRowText} numberOfLines={1}>
+                Passenger {r.passenger_id?.slice(0, 8) ?? 'reserved'}
+              </Text>
+              <Text style={styles.reservationRowSub}>
+                {formatReservationCountdown(r.expires_at)}
+              </Text>
+            </View>
+            <Text style={styles.reservationBoardBtn}>Board</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    </View>
+  );
 }
 
 // ─── Reservation banner ──────────────────────────────────────────────────────
@@ -802,7 +855,10 @@ function ActiveView({
   };
   const originCoords    = getPlaceCoords(trip.route?.origin);
   const destCoords      = getPlaceCoords(trip.route?.destination);
-  const tripRoutePoints = [originCoords, mateCoords, destCoords].filter(Boolean);
+  const tripRoutePoints = useMemo(
+    () => [originCoords, mateCoords, destCoords].filter(Boolean),
+    [originCoords, mateCoords, destCoords],
+  );
 
   const mapRegion = mateCoords
     ? { ...mateCoords, latitudeDelta: 0.025, longitudeDelta: 0.025 }
@@ -846,7 +902,7 @@ function ActiveView({
       { ...mateCoords, latitudeDelta: 0.02, longitudeDelta: 0.02 },
       450,
     );
-  }, [mateCoords?.latitude, mateCoords?.longitude, showMap]);
+  }, [mateCoords, showMap]);
 
   useEffect(() => {
     if (!canUseNativeMap() || !showMap || !mapRef.current) return;
@@ -856,7 +912,7 @@ function ActiveView({
         animated: true,
       });
     }
-  }, [showMap, trip.route?.origin, trip.route?.destination]);
+  }, [showMap, tripRoutePoints]);
 
   return (
     <View style={styles.activeContainer}>
@@ -956,9 +1012,11 @@ function ActiveView({
             <LivePulse color="#FBBF24" size={6} />
             <Text style={styles.liveStatText}>{routePassengers.length} waiting</Text>
           </View>
-          <View style={styles.liveStatPill}>
-            <LivePulse color={C.ACCENT} size={6} />
-            <Text style={styles.liveStatText}>{reservationCount} reserved</Text>
+          <View style={[styles.liveStatPill, reservationCount > 0 && styles.liveStatPillReserved]}>
+            <LivePulse color={reservationCount > 0 ? C.ACCENT : C.ACCENT} size={6} />
+            <Text style={[styles.liveStatText, reservationCount > 0 && styles.liveStatTextReserved]}>
+              {reservationCount} reserved
+            </Text>
           </View>
           <View style={styles.liveStatPill}>
             <Ionicons name="time-outline" size={13} color={C.TEXT_SUB} />
@@ -996,6 +1054,8 @@ function ActiveView({
           </Pressable>
         </View>
       </View>
+
+      <ReservationsPanel reservations={tripReservations} onBoard={onBoardReservation} />
 
       {/* Map or big buttons */}
       {showMap ? (
@@ -1149,14 +1209,12 @@ function ActiveView({
               <Text style={styles.mapLegendText}>You</Text>
             </View>
             <View style={styles.mapLegendRow}>
-              <View style={[styles.mapLegendDot, { backgroundColor: C.PASSENGER_MAP }]} />
-              <Text style={styles.mapLegendText}>Passengers</Text>
+              <View style={[styles.mapLegendDot, { backgroundColor: C.ACCENT }]} />
+              <Text style={styles.mapLegendText}>Reserved seat</Text>
             </View>
             <View style={styles.mapLegendRow}>
-              <View style={[styles.mapLegendDot, { backgroundColor: C.ACCENT }]} />
-              <Text style={styles.mapLegendText} numberOfLines={1}>
-                {trip.route?.destination ?? 'Destination'}
-              </Text>
+              <View style={[styles.mapLegendDot, { backgroundColor: C.PASSENGER_MAP }]} />
+              <Text style={styles.mapLegendText}>Waiting</Text>
             </View>
           </View>
         </View>
@@ -1179,24 +1237,6 @@ function ActiveView({
           </Pressable>
         </View>
       )}
-
-      {tripReservations?.length ? (
-        <View style={styles.reservationList}>
-          <Text style={styles.reservationListTitle}>Reserved passengers — tap to board</Text>
-          {tripReservations.map((r) => (
-            <Pressable
-              key={r.id}
-              onPress={() => onBoardReservation?.(r.id)}
-              style={({ pressed }) => [styles.reservationRow, pressed && { opacity: 0.85 }]}>
-              <Ionicons name="ticket-outline" size={16} color={C.ACCENT} />
-              <Text style={styles.reservationRowText} numberOfLines={1}>
-                {r.pickup_stop ? `${r.pickup_stop} · ` : ''}Seat {r.passenger_id?.slice(0, 8) ?? 'passenger'}
-              </Text>
-              <Text style={styles.reservationBoardBtn}>Board</Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
 
       {!showMap ? (
         <View style={styles.activeFooter}>
@@ -1315,9 +1355,9 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
 
   const refreshActiveTripData = useCallback(async (tripId) => {
     if (!tripId) return;
-    const [{ data: row }, { data: reservations }] = await Promise.all([
+    const [{ data: row }, { data: reservations, error: resErr }] = await Promise.all([
       fetchTripById(tripId),
-      fetchActiveReservationsForTrip(tripId),
+      fetchMateTripReservations(tripId),
     ]);
     if (row) {
       setTrip((current) => applyTripRowFromDb(current, row));
@@ -1327,9 +1367,12 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         return;
       }
     }
-    if (reservations) {
-      setReservationCount(reservations.length);
+    if (resErr) {
+      console.warn('[Mate] load reservations:', resErr.message ?? resErr);
     }
+    const list = reservations ?? [];
+    setReservationCount(list.length);
+    setTripReservations(list);
     setLastSyncAt(Date.now());
   }, []);
 
@@ -1369,6 +1412,26 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
     }
   }, []);
 
+  // Backup poll — realtime can miss events on flaky networks.
+  useEffect(() => {
+    if (mode !== 'active' || !trip?.tripId) return undefined;
+
+    const poll = () => {
+      fetchMateTripReservations(trip.tripId)
+        .then(({ data, error }) => {
+          if (error) return;
+          const rows = data ?? [];
+          setTripReservations(rows);
+          setReservationCount(rows.length);
+        })
+        .catch(() => {});
+    };
+
+    poll();
+    const id = setInterval(poll, 12_000);
+    return () => clearInterval(id);
+  }, [mode, trip?.tripId]);
+
   // ─── Location helpers ──────────────────────────────────────────────────────
   const stopLocationTracking = useCallback(async (skipDelete = false) => {
     if (locationSubRef.current) {
@@ -1401,7 +1464,13 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
       const currentTrip = tripRef.current;
       if (mateId && currentTrip) {
         await upsertDriverLocation(
-          mateId, formatRoute(currentTrip.route), latitude, longitude, currentTrip.seatsLeft, initial.coords.heading ?? null,
+          mateId,
+          formatRoute(currentTrip.route),
+          latitude,
+          longitude,
+          currentTrip.seatsLeft,
+          initial.coords.heading ?? null,
+          routeFareGhs(currentTrip.route),
         );
         setLastSyncAt(Date.now());
         setTrip((t) => t && t.locationStatus !== 'active' ? { ...t, locationStatus: 'active' } : t);
@@ -1450,7 +1519,13 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         lastUploadAt = now;
 
         const { error } = await upsertDriverLocation(
-          mateId, formatRoute(currentTrip.route), latitude, longitude, currentTrip.seatsLeft, heading,
+          mateId,
+          formatRoute(currentTrip.route),
+          latitude,
+          longitude,
+          currentTrip.seatsLeft,
+          heading,
+          routeFareGhs(currentTrip.route),
         );
         if (error) {
           console.warn('[Mate] upsertDriverLocation failed:', error.message);
@@ -1484,7 +1559,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         }
       })
       .catch(() => {});
-  }, [mode, mateCoords?.latitude, mateCoords?.longitude]);
+  }, [mode, mateCoords]);
 
   // ─── Trip actions ──────────────────────────────────────────────────────────
   const [setupOpenCustom, setSetupOpenCustom] = useState(false);
@@ -1523,6 +1598,8 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         mateCoords?.latitude ?? null,
         mateCoords?.longitude ?? null,
         trip.seatsLeft,
+        null,
+        routeFareGhs(nextRoute),
       ).catch(() => {});
     }
   }, [trip, mateId, mateCoords]);
@@ -1539,34 +1616,53 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         return;
       }
 
+      const fare = routeFareGhs(route);
+
       const { data, error } = await createTrip(
         mateId,
         formatRoute(route),
         route.origin,
         route.destination,
         totalSeats,
+        fare,
       );
       if (error) {
         Alert.alert('Could not start trip', formatSupabaseError(error.message));
         return;
       }
+
+      let tripRow = data;
+      if (fare != null && (tripRow.fare_ghs == null || Number(tripRow.fare_ghs) <= 0)) {
+        const { data: patched } = await updateTripFare(tripRow.id, fare);
+        if (patched) tripRow = patched;
+      }
+
+      const routeWithFare = {
+        ...route,
+        fareGhs: tripRow.fare_ghs ?? fare,
+      };
       const newTrip = {
-        tripId: data.id,
-        route,
+        tripId: tripRow.id,
+        route: routeWithFare,
         totalSeats,
-        seatsLeft: data.available_seats ?? totalSeats,
+        seatsLeft: tripRow.available_seats ?? totalSeats,
         passengersOnboarded: 0,
         locationStatus: 'pending',
-        startedAt: data.created_at ?? new Date().toISOString(),
+        startedAt: tripRow.created_at ?? new Date().toISOString(),
       };
-      console.log('[Mate] Trip started in Supabase →', { id: data.id, route: formatRoute(route), totalSeats });
+      console.log('[Mate] Trip started in Supabase →', {
+        id: tripRow.id,
+        route: formatRoute(routeWithFare),
+        totalSeats,
+        fareGhs: routeWithFare.fareGhs,
+      });
       setTrip(newTrip);
       setMode('active');
       setReservationCount(0);
-      startReservationSubscription(data.id);
-      startTripSubscription(data.id);
+      startReservationSubscription(tripRow.id);
+      startTripSubscription(tripRow.id);
       startPassengerSubscription();
-      await startLocationTracking(route);
+      await startLocationTracking(routeWithFare);
     } finally {
       setDepartLoading(false);
     }
@@ -1588,6 +1684,8 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         mateCoordsRef.current?.latitude ?? null,
         mateCoordsRef.current?.longitude ?? null,
         seatsLeft,
+        null,
+        routeFareGhs(next.route),
       )
         .catch((e) => console.warn('[Mate] location seats sync failed:', e.message));
 
@@ -1612,6 +1710,13 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         passengersOnboarded: current.passengersOnboarded + 1,
       };
     });
+    const tripId = tripRef.current?.tripId;
+    if (tripId) {
+      const { data: list } = await fetchMateTripReservations(tripId);
+      const rows = list ?? [];
+      setTripReservations(rows);
+      setReservationCount(rows.length);
+    }
   }, [mateId]);
 
   const markTripFull = useCallback(() => {
@@ -1628,6 +1733,8 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         mateCoordsRef.current?.latitude ?? null,
         mateCoordsRef.current?.longitude ?? null,
         0,
+        null,
+        routeFareGhs(filled.route),
       )
         .catch((e) => console.warn('[Mate] location seats sync failed:', e.message));
 
@@ -1691,13 +1798,16 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
           id: routeId ?? `custom_restored_${activeTrip.id}`,
           origin: activeTrip.origin,
           destination: activeTrip.destination,
-          fareGhs: getRouteFare(null),
+          fareGhs: activeTrip.fare_ghs ?? getRouteFare(null),
           mapCenter:
             getPlaceCoords(activeTrip.origin) ??
             getPlaceCoords(activeTrip.destination) ??
             DEFAULT_MAP_REGION,
           isCustom: !customMatch,
         };
+      }
+      if (route && activeTrip.fare_ghs != null && Number(activeTrip.fare_ghs) > 0) {
+        route = { ...route, fareGhs: Number(activeTrip.fare_ghs) };
       }
 
       const restored = {
@@ -2055,9 +2165,9 @@ const styles = StyleSheet.create({
   departButtonText:    { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
 
   // Active
-  activeContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 16 },
+  activeContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 16, minHeight: 0 },
 
-  activeTripCard:    { backgroundColor: C.SURFACE, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: C.BORDER, marginBottom: 14 },
+  activeTripCard:    { flexShrink: 0, backgroundColor: C.SURFACE, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: C.BORDER, marginBottom: 14 },
   activeTripTop:     { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 },
   activeTripInfo:    { flex: 1, paddingRight: 12 },
   activeRouteHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
@@ -2104,25 +2214,57 @@ const styles = StyleSheet.create({
   onboardButtonSub:   { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '500' },
   reservationList: { paddingHorizontal: 20, paddingBottom: 12, gap: 8 },
   reservationListTitle: { color: C.TEXT_SUB, fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  reservationPanel: {
+    flexShrink: 0,
+    backgroundColor: 'rgba(243,111,33,0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: C.ACCENT + '55',
+  },
+  reservationPanelHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  reservationPanelTitle: { color: C.ACCENT, fontSize: 12, fontWeight: '800', flex: 1 },
+  reservationPanelScroll: { maxHeight: 88 },
+  reservationPanelScrollContent: { gap: 6, paddingBottom: 2 },
   reservationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     backgroundColor: C.SURFACE,
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderWidth: 1,
     borderColor: C.BORDER,
   },
-  reservationRowText: { flex: 1, color: C.TEXT, fontSize: 13, fontWeight: '600' },
+  reservationRowBody: { flex: 1, minWidth: 0 },
+  reservationRowText: { color: C.TEXT, fontSize: 13, fontWeight: '600' },
+  reservationRowSub: { color: C.TEXT_MUTED, fontSize: 11, fontWeight: '500', marginTop: 2 },
   reservationBoardBtn: { color: C.ACCENT, fontWeight: '800', fontSize: 13 },
+  liveStatPillReserved: {
+    backgroundColor: 'rgba(243,111,33,0.15)',
+    borderColor: C.ACCENT + '66',
+    borderWidth: 1,
+  },
+  liveStatTextReserved: { color: C.ACCENT, fontWeight: '800' },
   activeSecondaryRow: { flexDirection: 'row', gap: 12 },
   fullButton:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.SURFACE, borderRadius: 14, minHeight: 52, borderWidth: 1, borderColor: C.ACCENT + '50' },
   fullButtonText:{ color: C.ACCENT, fontSize: 15, fontWeight: '700' },
   endButton:     { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.SURFACE, borderRadius: 14, minHeight: 52, borderWidth: 1, borderColor: C.BORDER },
   endButtonText: { color: C.TEXT_MUTED, fontSize: 15, fontWeight: '700' },
 
-  mateMapWrapper:  { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: '#060606', borderWidth: 1, borderColor: C.BORDER },
+  mateMapWrapper: {
+    flex: 1,
+    minHeight: 300,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#060606',
+    borderWidth: 1,
+    borderColor: C.BORDER,
+  },
   mapEmptyOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 14 },
   mapEmptyPill:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.75)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
   mapEmptyText:    { color: C.TEXT_SUB, fontSize: 12 },
