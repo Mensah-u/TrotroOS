@@ -601,8 +601,17 @@ export default function LiveRouteMap({
           {isTrackingReserved && !reservedDriver ? (
             <View style={styles.emptyOverlay} pointerEvents="none">
               <View style={styles.emptyPill}>
-                <Ionicons name="locate-outline" size={14} color="#FBBF24" />
-                <Text style={styles.emptyText}>Locating your reserved ride…</Text>
+                <Ionicons name="locate-outline" size={14} color={Theme.colors.seatFilling} />
+                <Text style={styles.emptyText}>Waiting for driver GPS…</Text>
+              </View>
+            </View>
+          ) : null}
+
+          {isTrackingReserved && reservedDriver ? (
+            <View style={styles.trackingOverlay} pointerEvents="none">
+              <View style={styles.trackingPill}>
+                <View style={[styles.legendDot, { backgroundColor: Theme.colors.mateMap }]} />
+                <Text style={styles.trackingPillText}>Live · tracking your ride</Text>
               </View>
             </View>
           ) : null}
@@ -738,6 +747,25 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   emptyText: { color: Theme.colors.textSub, fontSize: 12, fontWeight: '600' },
+  trackingOverlay: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
+    alignItems: 'center',
+  },
+  trackingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(33,150,243,0.35)',
+  },
+  trackingPillText: { color: Theme.colors.text, fontSize: 11, fontWeight: '800' },
   mapHint: {
     color: Theme.colors.textMuted,
     fontSize: 11,

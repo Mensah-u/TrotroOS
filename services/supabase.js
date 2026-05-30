@@ -127,6 +127,48 @@ export async function fetchNearbyDriverLocations(center, radiusKm = 2) {
   return q;
 }
 
+/** Single mate GPS row — used when passenger is tracking a reserved ride. */
+export async function fetchDriverLocationByMateId(mateId) {
+  if (!mateId) return { data: null, error: { message: 'No mate id' } };
+  return supabase.from(T.DRIVER_LOCATIONS).select('*').eq('mate_id', mateId).maybeSingle();
+}
+
+/**
+ * Realtime subscription for one mate's driver_locations row.
+ * Bypasses geo bbox so reserved-ride tracking works at any distance.
+ */
+export function subscribeToDriverLocationByMateId(mateId, callback) {
+  if (!mateId) return null;
+
+  const reload = () => {
+    fetchDriverLocationByMateId(mateId).then(({ data, error }) => {
+      if (error) {
+        console.warn('[TrotroOS] driver location by mate failed:', error.message);
+        return;
+      }
+      callback(data ?? null);
+    });
+  };
+
+  reload();
+
+  const channel = supabase
+    .channel(uniqueChannel(`driver_loc_${mateId}`))
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: T.DRIVER_LOCATIONS,
+        filter: `mate_id=eq.${mateId}`,
+      },
+      () => reload(),
+    )
+    .subscribe();
+
+  return channel;
+}
+
 /**
  * Resolve the query center from a static value or a live ref (preferred for
  * moving users so reload() always uses the latest GPS fix).
@@ -615,7 +657,7 @@ export function subscribeToReservations(tripId, callback) {
 }
 
 export function fetchTripById(tripId) {
-  return supabase.from(T.TRIPS).select('*').eq('id', tripId).maybeSingle();
+  return supabase.from(T.TRIPS).select(TRIPS_SELECT_WITH_MATE).eq('id', tripId).maybeSingle();
 }
 
 export function fetchActiveReservationsForTrip(tripId) {

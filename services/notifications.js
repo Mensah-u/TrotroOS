@@ -1,13 +1,20 @@
-import Constants from 'expo-constants';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 
 import { upsertPushToken } from '@/services/featuresV14';
 
+/** Remote push was removed from Expo Go in SDK 53 — never load the native module there. */
+const isExpoGo =
+  Constants.executionEnvironment === ExecutionEnvironment.StoreClient
+  || Constants.appOwnership === 'expo';
+
 let Notifications = null;
-try {
-  Notifications = require('expo-notifications');
-} catch {
-  Notifications = null;
+if (!isExpoGo) {
+  try {
+    Notifications = require('expo-notifications');
+  } catch {
+    Notifications = null;
+  }
 }
 
 if (Notifications) {
@@ -21,7 +28,7 @@ if (Notifications) {
 }
 
 export function isPushAvailable() {
-  return Boolean(Notifications) && Platform.OS !== 'web';
+  return !isExpoGo && Boolean(Notifications) && Platform.OS !== 'web';
 }
 
 /** Request permission and register Expo push token with Supabase. */

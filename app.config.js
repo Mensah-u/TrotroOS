@@ -19,8 +19,18 @@ function pick(envKey, secrets, secretKey) {
 
 const secrets = loadLocalSecrets();
 
+/** Push plugin is for EAS builds only — it triggers a hard ERROR in Expo Go (SDK 53+). */
+const isEasBuild = process.env.EAS_BUILD === 'true';
+
+const plugins = (base.expo.plugins ?? []).filter((entry) => {
+  const name = Array.isArray(entry) ? entry[0] : entry;
+  if (name === 'expo-notifications' && !isEasBuild) return false;
+  return true;
+});
+
 module.exports = () => ({
   ...base.expo,
+  plugins,
   extra: {
     ...base.expo.extra,
     supabaseUrl: pick('EXPO_PUBLIC_SUPABASE_URL', secrets, 'SUPABASE_URL'),

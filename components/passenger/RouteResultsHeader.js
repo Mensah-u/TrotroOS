@@ -27,7 +27,10 @@ export default function RouteResultsHeader({
               {fromPlace} → {toPlace}
             </Text>
             {onEditRoute ? (
-              <Ionicons name="create-outline" size={14} color={Theme.colors.textMuted} />
+              <>
+                <Ionicons name="chevron-back" size={14} color={Theme.colors.passengerMap} />
+                <Text style={styles.changeRouteHint}>Change</Text>
+              </>
             ) : null}
           </Pressable>
           {rideCount > 0 ? (
@@ -88,6 +91,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   routePillText: { color: Theme.colors.text, fontSize: 13, fontWeight: '800', flex: 1 },
+  changeRouteHint: { color: Theme.colors.passengerMap, fontSize: 11, fontWeight: '800' },
   countBadge: {
     flexShrink: 0,
     backgroundColor: Theme.colors.success + '22',

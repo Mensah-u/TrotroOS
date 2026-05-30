@@ -7,6 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "trotrops",
     "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.trotro.os"
@@ -35,7 +36,10 @@
     },
     "web": {
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "TrotroOS",
+      "themeColor": "#121212",
+      "backgroundColor": "#121212"
     },
     "plugins": [
       [

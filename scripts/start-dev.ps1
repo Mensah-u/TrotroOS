@@ -1,7 +1,6 @@
 # Start Metro on a fixed LAN port with QR (no port prompts, works offline).
 param([int]$Port = 8081)
 
-$ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot\..
 
 $envFile = Join-Path $PSScriptRoot "..\.env"
@@ -36,4 +35,10 @@ Remove-Item Env:CI -ErrorAction SilentlyContinue
 
 & "$PSScriptRoot\show-qr.ps1" -Port $Port
 
-npx expo start -c --lan --port $Port
+Write-Host "Offline mode: skipping Expo dependency check (normal for local dev)." -ForegroundColor DarkGray
+Write-Host "Reload: press r in THIS window — not in a separate PowerShell prompt." -ForegroundColor DarkGray
+Write-Host ""
+
+# Continue on stderr from npx/expo (e.g. offline-mode notice) so Metro keeps running.
+$ErrorActionPreference = 'Continue'
+npx expo start -c --lan --port $Port --offline

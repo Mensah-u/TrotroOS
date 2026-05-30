@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRoute } from '@react-navigation/native';
 import {
   Alert,
+  BackHandler,
   FlatList,
   Platform,
   Pressable,
@@ -53,12 +54,15 @@ import {
   expireStaleReservations,
   fetchNearbyDriverLocations,
   fetchNearbyActiveTrips,
+  fetchDriverLocationByMateId,
   fetchPassengerLocations,
+  fetchTripById,
   getActiveReservation,
   getMateRatingAverages,
   submitRating,
   isPassengerLocationsAvailable,
   subscribeToDriverLocations,
+  subscribeToDriverLocationByMateId,
   subscribeToPassengerLocations,
   subscribeToTrips,
   upsertPassengerLocation,
@@ -122,6 +126,7 @@ export default function FindRideScreen({ navigation }) {
   const [pickupStop,            setPickupStop]            = useState(null);
   const [rideSheet,           setRideSheet]           = useState(null);
   const [liveDrivers,         setLiveDrivers]         = useState([]);
+  const [trackedReservedDriver, setTrackedReservedDriver] = useState(null);
   const [liveTrips,           setLiveTrips]           = useState([]);
   const [reserving,           setReserving]           = useState(false);
   const [deviceId,            setDeviceId]            = useState(null);
@@ -133,6 +138,7 @@ export default function FindRideScreen({ navigation }) {
   const [queuedRouteLabel,    setQueuedRouteLabel]    = useState(null);
   const [selectedTripId,      setSelectedTripId]      = useState(null);
   const [vehicleFilter,       setVehicleFilter]       = useState(null);
+  const [dismissedTripIds,    setDismissedTripIds]    = useState(() => new Set());
 
   const [demandByRoute,  setDemandByRoute] = useState({});
   const [mateAverages,   setMateAverages]  = useState({});
@@ -220,23 +226,35 @@ export default function FindRideScreen({ navigation }) {
     if (!mountedRef.current) return;
     setLiveTrips(trips);
 
-    // Detect trip completion → prompt rating
+    // Detect trip completion → prompt rating (confirm via direct fetch — bbox may miss the trip)
     const reserved = reservedTripRef.current;
     if (reserved) {
       const stillActive = trips.some((t) => t.id === reserved.tripId);
       if (!stillActive && !pendingRating) {
-        setPendingRating({
-          tripId:   reserved.tripId,
-          mateId:   reserved.mateId,
-          mateName: reserved.mateName,
-          trip:     reserved,
-        });
-        reservedTripRef.current = null;
-        setReservedTrip(null);
-        setActiveReservationId(null);
-        setReservationExpiresAt(null);
-        clearActiveReservationCache().catch(() => {});
-        stopBroadcast({ removeFromDb: true });
+        fetchTripById(reserved.tripId)
+          .then(({ data, error }) => {
+            if (!mountedRef.current || error) return;
+            if (data?.status === 'active' || data?.status === 'full') {
+              setLiveTrips((prev) => {
+                const rest = prev.filter((t) => t.id !== data.id);
+                return [...rest, data];
+              });
+              return;
+            }
+            setPendingRating({
+              tripId:   reserved.tripId,
+              mateId:   reserved.mateId,
+              mateName: reserved.mateName,
+              trip:     reserved,
+            });
+            reservedTripRef.current = null;
+            setReservedTrip(null);
+            setActiveReservationId(null);
+            setReservationExpiresAt(null);
+            clearActiveReservationCache().catch(() => {});
+            stopBroadcast({ removeFromDb: true });
+          })
+          .catch(() => {});
       }
     }
 
@@ -268,8 +286,62 @@ export default function FindRideScreen({ navigation }) {
         radiusKm: NEARBY_RADIUS_KM,
       }),
     [nearbyKey, showRouteResults],
-    { enabled: showRouteResults },
+    { enabled: showRouteResults && !isTrackingReserved },
   );
+
+  // Reserved ride: always follow the assigned mate, regardless of bbox.
+  useSupabaseChannel(
+    () =>
+      subscribeToDriverLocationByMateId(reservedTrip?.mateId, (driver) => {
+        if (!mountedRef.current) return;
+        setTrackedReservedDriver(driver);
+        if (driver) {
+          setLiveDrivers((prev) => {
+            const rest = prev.filter((d) => d.mate_id !== driver.mate_id);
+            return [...rest, driver];
+          });
+        }
+      }),
+    [reservedTrip?.mateId, isTrackingReserved],
+    { enabled: isTrackingReserved && !!reservedTrip?.mateId },
+  );
+
+  // Keep reserved trip row fresh even when mate is outside the nearby bbox.
+  useEffect(() => {
+    if (!isTrackingReserved || !reservedTrip?.tripId) {
+      setTrackedReservedDriver(null);
+      return undefined;
+    }
+
+    const syncReservedTrip = () => {
+      fetchTripById(reservedTrip.tripId)
+        .then(({ data, error }) => {
+          if (!mountedRef.current || error || !data) return;
+          setLiveTrips((prev) => {
+            const rest = prev.filter((t) => t.id !== data.id);
+            return [...rest, data];
+          });
+        })
+        .catch(() => {});
+
+      fetchDriverLocationByMateId(reservedTrip.mateId)
+        .then(({ data, error }) => {
+          if (!mountedRef.current || error) return;
+          setTrackedReservedDriver(data ?? null);
+          if (data) {
+            setLiveDrivers((prev) => {
+              const rest = prev.filter((d) => d.mate_id !== data.mate_id);
+              return [...rest, data];
+            });
+          }
+        })
+        .catch(() => {});
+    };
+
+    syncReservedTrip();
+    const id = setInterval(syncReservedTrip, DEMAND_POLL_MS);
+    return () => clearInterval(id);
+  }, [isTrackingReserved, reservedTrip?.tripId, reservedTrip?.mateId]);
 
   // Live demand per route (queue) — only when the DB table exists.
   useSupabaseChannel(
@@ -286,9 +358,10 @@ export default function FindRideScreen({ navigation }) {
     { enabled: showRouteResults && isPassengerLocationsAvailable() },
   );
 
-  // Single poll loop — only after route is fully chosen (debounced).
+  // Single poll loop — browse nearby fleet; reserved mate sync handled above.
   useEffect(() => {
-    if (!showRouteResults || !passengerCoords) return undefined;
+    if (!showRouteResults || isTrackingReserved) return undefined;
+    if (!passengerCoords) return undefined;
     const poll = () => {
       if (!mountedRef.current) return;
       fetchNearbyDriverLocations(passengerCoords, NEARBY_RADIUS_KM)
@@ -364,8 +437,12 @@ export default function FindRideScreen({ navigation }) {
 
   const reservedDriver = useMemo(() => {
     if (!reservedTrip?.mateId) return null;
-    return liveDrivers.find((d) => d.mate_id === reservedTrip.mateId) ?? null;
-  }, [liveDrivers, reservedTrip]);
+    return (
+      trackedReservedDriver
+      ?? liveDrivers.find((d) => d.mate_id === reservedTrip.mateId)
+      ?? null
+    );
+  }, [liveDrivers, reservedTrip, trackedReservedDriver]);
 
   const selectedRouteLabel = fromPlace && toPlace ? `${fromPlace} → ${toPlace}` : null;
   const selectedRouteMeta = useMemo(
@@ -453,26 +530,38 @@ export default function FindRideScreen({ navigation }) {
       });
   }, [displayTrips, liveDrivers, pickupCoords, selectedRouteMeta, fromPlace, toPlace]);
 
+  const visibleEnrichedTrips = useMemo(
+    () => enrichedTrips.filter((t) => !dismissedTripIds.has(t.id)),
+    [enrichedTrips, dismissedTripIds],
+  );
+
   const routeEtaSummary = useMemo(
-    () => summarizeRoutePickup(enrichedTrips.filter((t) => t.availableSeats > 0).map((t) => t.eta)),
-    [enrichedTrips],
+    () => summarizeRoutePickup(visibleEnrichedTrips.filter((t) => t.availableSeats > 0).map((t) => t.eta)),
+    [visibleEnrichedTrips],
   );
 
   const selectedTrip = useMemo(
-    () => enrichedTrips.find((t) => t.id === selectedTripId) ?? null,
-    [enrichedTrips, selectedTripId],
+    () => visibleEnrichedTrips.find((t) => t.id === selectedTripId) ?? null,
+    [visibleEnrichedTrips, selectedTripId],
   );
 
   useEffect(() => {
     setSelectedTripId(null);
     setVehicleFilter(null);
+    setDismissedTripIds(new Set());
   }, [fromPlace, toPlace]);
 
   useEffect(() => {
     if (activeReservationId || selectedTripId) return;
-    const firstAvailable = enrichedTrips.find((t) => t.availableSeats > 0);
+    const firstAvailable = visibleEnrichedTrips.find((t) => t.availableSeats > 0);
     if (firstAvailable) setSelectedTripId(firstAvailable.id);
-  }, [enrichedTrips, activeReservationId, selectedTripId]);
+  }, [visibleEnrichedTrips, activeReservationId, selectedTripId]);
+
+  const handleDismissTrip = useCallback((trip) => {
+    setDismissedTripIds((prev) => new Set(prev).add(trip.id));
+    if (selectedTripId === trip.id) setSelectedTripId(null);
+    if (rideSheet?.trip?.id === trip.id) setRideSheet(null);
+  }, [selectedTripId, rideSheet?.trip?.id]);
 
   const handleSwapRoute = () => {
     if (!fromPlace || !toPlace) return;
@@ -606,6 +695,71 @@ export default function FindRideScreen({ navigation }) {
     setRideSheet(null);
   };
 
+  const resetRouteSearch = useCallback(async () => {
+    setVehicleFilter(null);
+    setPickupStop(null);
+    setSelectedTripId(null);
+    setRideSheet(null);
+    setFromPlace(null);
+    setToPlace(null);
+    if (isWaiting) {
+      setIsWaiting(false);
+      setQueuedRouteLabel(null);
+      await stopBroadcast({ removeFromDb: true });
+    }
+  }, [isWaiting, stopBroadcast]);
+
+  const handleBackToRoutePlanner = useCallback(() => {
+    if (isTrackingReserved) {
+      Alert.alert(
+        'Change route?',
+        'Cancel your reserved seat, then you can search for a different trip.',
+        [
+          { text: 'Keep ride', style: 'cancel' },
+          {
+            text: 'Cancel & go back',
+            style: 'destructive',
+            onPress: async () => {
+              await clearReservation();
+              await resetRouteSearch();
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    if (isWaiting || selectedTripId) {
+      Alert.alert(
+        'Change route?',
+        isWaiting
+          ? 'You will leave the waiting queue for this route.'
+          : 'Your selected ride will be cleared.',
+        [
+          { text: 'Stay on this route', style: 'cancel' },
+          { text: 'Change route', onPress: () => resetRouteSearch() },
+        ],
+      );
+      return;
+    }
+
+    resetRouteSearch();
+  }, [
+    isTrackingReserved,
+    isWaiting,
+    selectedTripId,
+    resetRouteSearch,
+  ]);
+
+  useEffect(() => {
+    if (!showRouteResults) return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleBackToRoutePlanner();
+      return true;
+    });
+    return () => sub.remove();
+  }, [showRouteResults, handleBackToRoutePlanner]);
+
   const isActivePassenger = !!activeReservationId || isWaiting;
 
   const problemBannerPhase = useMemo(() => {
@@ -620,13 +774,7 @@ export default function FindRideScreen({ navigation }) {
     return PASSENGER.subtitleIdle;
   }, [fromPlace, toPlace, showRouteResults, isTrackingReserved]);
 
-  const handleEditRoute = useCallback(() => {
-    setFromPlace(null);
-    setToPlace(null);
-    setPickupStop(null);
-    setSelectedTripId(null);
-    setRideSheet(null);
-  }, []);
+  const handleEditRoute = handleBackToRoutePlanner;
 
   const shareRoute = useCallback(async () => {
     if (!fromPlace || !toPlace) return;
@@ -659,7 +807,25 @@ export default function FindRideScreen({ navigation }) {
           </View>
         ) : null}
 
-        {fromPlace && toPlace ? (
+        {showRouteResults ? (
+          <Pressable
+            onPress={handleBackToRoutePlanner}
+            accessibilityRole="button"
+            accessibilityLabel="Change route"
+            style={({ pressed }) => [styles.backToPlannerRow, pressed && { opacity: 0.85 }]}>
+            <Ionicons name="chevron-back" size={20} color={Theme.colors.passengerMap} />
+            <Text style={styles.backToPlannerText}>
+              {isTrackingReserved ? 'Cancel ride & change route' : 'Change route'}
+            </Text>
+            {fromPlace && toPlace ? (
+              <Text style={styles.backToPlannerHint} numberOfLines={1}>
+                {fromPlace} → {toPlace}
+              </Text>
+            ) : null}
+          </Pressable>
+        ) : null}
+
+        {showRouteResults && !isTrackingReserved && fromPlace && toPlace ? (
           <Pressable onPress={shareRoute} style={styles.shareRow}>
             <Ionicons name="share-social-outline" size={16} color={Theme.colors.passenger} />
             <Text style={styles.shareText}>{t('shareTrip')}</Text>
@@ -731,6 +897,21 @@ export default function FindRideScreen({ navigation }) {
             </View>
           </View>
           <View style={styles.trackingRight}>
+            <Pressable
+              onPress={() => {
+                Alert.alert(
+                  'Close ride?',
+                  'Your seat will be released for other passengers.',
+                  [
+                    { text: 'Keep ride', style: 'cancel' },
+                    { text: 'Close ride', style: 'destructive', onPress: clearReservation },
+                  ],
+                );
+              }}
+              hitSlop={10}
+              style={({ pressed }) => [styles.trackingCloseBtn, pressed && { opacity: 0.7 }]}>
+              <Ionicons name="close-circle" size={22} color={C.DANGER} />
+            </Pressable>
             <View style={styles.trackingLive}>
               <View style={styles.trackingLiveDot} />
               <Text style={styles.trackingLiveText}>
@@ -794,7 +975,7 @@ export default function FindRideScreen({ navigation }) {
           fromPlace={fromPlace ?? reservedTrip?.originStation}
           toPlace={toPlace ?? reservedTrip?.destination}
           passengerCoords={passengerCoords}
-          enrichedTrips={enrichedTrips}
+          enrichedTrips={visibleEnrichedTrips}
           selectedTripId={selectedTripId}
           reservedTrip={displayReservedTrip ?? reservedTrip}
           reservedDriver={reservedDriver}
@@ -804,7 +985,7 @@ export default function FindRideScreen({ navigation }) {
         />
         <FlatList
           style={styles.list}
-          data={enrichedTrips}
+          data={visibleEnrichedTrips}
           keyExtractor={(item) => String(item.id)}
           removeClippedSubviews={false}
           nestedScrollEnabled={false}
@@ -819,6 +1000,7 @@ export default function FindRideScreen({ navigation }) {
               onViewDetails={handleViewDetails}
               onReserve={handleReserve}
               onQueue={handleQueue}
+              onDismiss={handleDismissTrip}
             />
           )}
           contentContainerStyle={[
@@ -830,7 +1012,7 @@ export default function FindRideScreen({ navigation }) {
             <RouteResultsHeader
               fromPlace={fromPlace}
               toPlace={toPlace}
-              rideCount={enrichedTrips.filter((t) => t.availableSeats > 0).length}
+              rideCount={visibleEnrichedTrips.filter((t) => t.availableSeats > 0).length}
               routeSummary={routeEtaSummary}
               onEditRoute={handleEditRoute}
             />
@@ -1026,6 +1208,32 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(243,111,33,0.2)',
   },
   corridorText: { color: Theme.colors.passenger, fontSize: 12, fontWeight: '700', flex: 1 },
+  backToPlannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginHorizontal: SCREEN_GUTTER,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: C.SURFACE,
+    borderWidth: 1,
+    borderColor: C.BORDER,
+  },
+  backToPlannerText: {
+    color: Theme.colors.passengerMap,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  backToPlannerHint: {
+    flex: 1,
+    textAlign: 'right',
+    color: C.TEXT_SUB,
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
   shareRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1076,6 +1284,7 @@ const styles = StyleSheet.create({
   trackingCountdown: { color: '#FBBF24', fontSize: 11, fontWeight: '700', marginTop: 4 },
   trackingEta: { color: Theme.colors.passenger, fontSize: 11, fontWeight: '700', marginTop: 2 },
   trackingRight: { alignItems: 'flex-end', gap: 8 },
+  trackingCloseBtn: { marginBottom: 2 },
   trackingLive: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.SUCCESS_SOFT, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   trackingLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.SUCCESS },
   trackingLiveText: { color: C.SUCCESS, fontSize: 11, fontWeight: '800' },

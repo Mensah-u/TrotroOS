@@ -14,6 +14,7 @@ const MAP_REF_STUB = {
  * Android release APKs crash when MapView loads without a Google Maps API key.
  */
 export function canUseNativeMap() {
+  if (Platform.OS === 'web') return false;
   if (Platform.OS !== 'android') return true;
   return Boolean(GOOGLE_MAPS_ANDROID_KEY?.trim());
 }

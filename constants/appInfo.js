@@ -1,6 +1,6 @@
 /** App-wide contact, version, and legal copy. */
 export const APP_NAME = 'TrotroOS';
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.4.0';
 export const APP_TAGLINE = 'Real-time trotro seats for Kumasi';
 export const APP_CITY = 'Kumasi, Ghana';
 

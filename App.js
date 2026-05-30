@@ -13,6 +13,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import BrandedLoader from './components/BrandedLoader';
+import WebAppShell from './components/WebAppShell';
 import { I18nProvider } from './context/I18nContext';
 import { loadStaticData, refreshStaticData } from './services/staticData';
 import { recordEvent, recordError, initMonitoring } from './services/monitoring';
@@ -322,16 +323,18 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ErrorBoundary>
-          <I18nProvider>
-            <AppSessionContext.Provider value={session}>
-              <NavigationContainer>
-                <StatusBar style="light" />
-                <AppRoot />
-              </NavigationContainer>
-            </AppSessionContext.Provider>
-          </I18nProvider>
-        </ErrorBoundary>
+        <WebAppShell>
+          <ErrorBoundary>
+            <I18nProvider>
+              <AppSessionContext.Provider value={session}>
+                <NavigationContainer>
+                  <StatusBar style="light" />
+                  <AppRoot />
+                </NavigationContainer>
+              </AppSessionContext.Provider>
+            </I18nProvider>
+          </ErrorBoundary>
+        </WebAppShell>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

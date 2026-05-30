@@ -33,6 +33,7 @@ export default function RouteRideCard({
   onViewDetails,
   onReserve,
   onQueue,
+  onDismiss,
 }) {
   const isFull = trip.availableSeats === 0 || trip.status === 'full';
   const { label, color, dot } = getSeatStatus(trip.availableSeats);
@@ -63,6 +64,15 @@ export default function RouteRideCard({
       ) : null}
 
       <View style={[styles.cardAccent, { backgroundColor: isFull ? C.FULL : selected ? Theme.colors.passenger : C.ACCENT }]} />
+
+      {onDismiss ? (
+        <Pressable
+          onPress={() => onDismiss(trip)}
+          hitSlop={10}
+          style={({ pressed }) => [styles.dismissBtn, pressed && { opacity: 0.7 }]}>
+          <Ionicons name="close" size={16} color={C.TEXT_MUTED} />
+        </Pressable>
+      ) : null}
 
       <View style={styles.cardInner}>
         {/* ETA hero row */}
@@ -209,6 +219,7 @@ export default function RouteRideCard({
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
+    position: 'relative',
     backgroundColor: C.SURFACE,
     borderRadius: 18,
     marginBottom: 14,
@@ -222,6 +233,20 @@ const styles = StyleSheet.create({
   },
   cardFull: { opacity: 0.85 },
   cardAccent: { width: 4 },
+  dismissBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: C.SURFACE_UP,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: C.BORDER,
+  },
   cardInner: { flex: 1, padding: 16 },
 
   etaRow: {

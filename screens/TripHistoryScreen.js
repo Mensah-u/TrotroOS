@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -9,6 +9,9 @@ import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { formatRoute, getRouteFare, routes } from '@/constants/routes';
 import { getOrCreateDeviceId } from '@/services/passengerProfile';
 import {
+  cancelReservation,
+  deleteDriverLocation,
+  endTrip,
   getCurrentMate,
   getMateTripHistory,
   getPassengerHistory,
@@ -54,11 +57,12 @@ function fareForRoute(routeLabel) {
 }
 
 // ─── Row components ──────────────────────────────────────────────────────────
-function PassengerRow({ reservation, navigation }) {
+function PassengerRow({ reservation, navigation, onCloseRide }) {
   const trip = reservation.trips ?? {};
   const mate = trip.mate_profiles ?? {};
   const s    = statusMeta(reservation.status);
   const fare = fareForRoute(trip.route ?? '');
+  const canClose = reservation.status === 'active';
 
   const bookAgain = () => {
     const parts = (trip.route ?? '').split('→').map((p) => p.trim());
@@ -109,16 +113,23 @@ function PassengerRow({ reservation, navigation }) {
         <Pressable onPress={bookAgain} style={styles.rebookBtn}>
           <Text style={styles.rebookText}>Book again</Text>
         </Pressable>
+        {canClose ? (
+          <Pressable onPress={() => onCloseRide?.(reservation)} style={styles.closeRideBtn}>
+            <Ionicons name="close-outline" size={14} color={C.DANGER} />
+            <Text style={styles.closeRideText}>Close ride</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
 }
 
-function MateTripRow({ trip }) {
+function MateTripRow({ trip, onCloseTrip }) {
   const s = statusMeta(trip.status);
   const occupied = (trip.total_seats ?? 0) - (trip.available_seats ?? 0);
   const fare = fareForRoute(trip.route ?? '');
   const estEarnings = occupied * fare;
+  const canClose = trip.status === 'active' || trip.status === 'full';
 
   return (
     <View style={styles.card}>
@@ -150,6 +161,12 @@ function MateTripRow({ trip }) {
           <View style={styles.farePill}>
             <Text style={styles.fareText}>~GHS {estEarnings}</Text>
           </View>
+        ) : null}
+        {canClose ? (
+          <Pressable onPress={() => onCloseTrip?.(trip)} style={styles.closeRideBtn}>
+            <Ionicons name="close-outline" size={14} color={C.DANGER} />
+            <Text style={styles.closeRideText}>Close trip</Text>
+          </Pressable>
         ) : null}
       </View>
     </View>
@@ -228,6 +245,53 @@ export default function TripHistoryScreen({ navigation }) {
     loadHistory(false);
   }, [loadHistory]);
 
+  const handleClosePassengerRide = useCallback((reservation) => {
+    Alert.alert(
+      'Close ride?',
+      'Your seat will be released and this ride removed from your active list.',
+      [
+        { text: 'Keep ride', style: 'cancel' },
+        {
+          text: 'Close ride',
+          style: 'destructive',
+          onPress: async () => {
+            const did = deviceId ?? (await getOrCreateDeviceId());
+            if (!did) return;
+            const { ok } = await cancelReservation(reservation.id, did);
+            if (!ok) {
+              Alert.alert('Could not close ride', 'Try again in a moment.');
+              return;
+            }
+            loadHistory(false);
+          },
+        },
+      ],
+    );
+  }, [deviceId, loadHistory]);
+
+  const handleCloseMateTrip = useCallback((trip) => {
+    Alert.alert(
+      'Close trip?',
+      'This trip will be marked completed and removed from the live map for passengers.',
+      [
+        { text: 'Keep trip', style: 'cancel' },
+        {
+          text: 'Close trip',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await endTrip(trip.id);
+              await deleteDriverLocation(mateUserId).catch(() => {});
+              loadHistory(false);
+            } catch {
+              Alert.alert('Could not close trip', 'Make sure you are signed in as a mate and try again.');
+            }
+          },
+        },
+      ],
+    );
+  }, [mateUserId, loadHistory]);
+
   if (loading) return <BrandedLoader message="Loading history" />;
 
   const data = tab === 'passenger' ? reservations : trips;
@@ -274,7 +338,7 @@ export default function TripHistoryScreen({ navigation }) {
         <View style={styles.liveBanner}>
           <View style={styles.liveDot} />
           <Text style={styles.liveBannerText}>
-            {activeCount} live {tab === 'mate' ? 'trip' : 'ride'}{activeCount === 1 ? '' : 's'} · updates automatically
+            {activeCount} live {tab === 'mate' ? 'trip' : 'ride'}{activeCount === 1 ? '' : 's'} · tap Close to remove
           </Text>
         </View>
       ) : null}
@@ -287,7 +351,15 @@ export default function TripHistoryScreen({ navigation }) {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.ACCENT} />
         }
         renderItem={({ item }) =>
-          tab === 'passenger' ? <PassengerRow reservation={item} navigation={navigation} /> : <MateTripRow trip={item} />
+          tab === 'passenger' ? (
+            <PassengerRow
+              reservation={item}
+              navigation={navigation}
+              onCloseRide={handleClosePassengerRide}
+            />
+          ) : (
+            <MateTripRow trip={item} onCloseTrip={handleCloseMateTrip} />
+          )
         }
         ListEmptyComponent={
           tab === 'passenger' ? (
@@ -343,6 +415,18 @@ const styles = StyleSheet.create({
   fareText:     { color: C.SUCCESS, fontSize: 11, fontWeight: '800' },
   rebookBtn:    { marginLeft: 'auto', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: C.ACCENT + '55' },
   rebookText:   { color: C.ACCENT, fontSize: 11, fontWeight: '800' },
+  closeRideBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.DANGER + '55',
+    backgroundColor: 'rgba(255,82,82,0.08)',
+  },
+  closeRideText: { color: C.DANGER, fontSize: 11, fontWeight: '800' },
 
   empty:        { alignItems: 'center', paddingTop: 64, gap: 10 },
   emptyIcon:    { width: 64, height: 64, borderRadius: 20, backgroundColor: C.SURFACE, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.BORDER, marginBottom: 4 },

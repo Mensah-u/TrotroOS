@@ -6,7 +6,7 @@ TrotroOS connects passengers with trotro mates (drivers) on live routes across K
 
 | | |
 |---|---|
-| **Version** | 1.3.0 |
+| **Version** | 1.4.0 |
 | **Platform** | Android (primary), iOS-ready |
 | **Package** | `com.trotro.os` |
 | **Region** | Kumasi — GHS fares, on-board / MoMo payment |
