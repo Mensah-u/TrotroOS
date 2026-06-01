@@ -16,7 +16,11 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ─── 1. Geohash helper (pure SQL, no extensions required) ───────────────────
-create or replace function public.geohash_encode(lat double precision, lng double precision, precision int default 5)
+create or replace function public.geohash_encode(
+  lat double precision,
+  lng double precision,
+  hash_len int default 5
+)
 returns text
 language plpgsql
 immutable
@@ -36,7 +40,7 @@ declare
 begin
   if lat is null or lng is null then return null; end if;
 
-  while char_length(hash) < precision loop
+  while char_length(hash) < hash_len loop
     if even then
       mid := (lng_min + lng_max) / 2;
       if lng >= mid then bits := (bits << 1) | 1; lng_min := mid;

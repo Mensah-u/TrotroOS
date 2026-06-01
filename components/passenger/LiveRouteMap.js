@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SafeMapView, { canUseNativeMap, SafeCallout, SafeMarker, SafePolyline } from '@/components/SafeMapView';
 import InteractiveWebMap from '@/components/InteractiveWebMap';
+import RouteDirectionArrow from '@/components/RouteDirectionArrow';
 import { GOOGLE_MAPS_WEB_KEY } from '@/constants/config';
 import PulsingMapMarker from '@/components/PulsingMapMarker';
 import MapClusterMarker from '@/components/MapClusterMarker';
@@ -190,9 +191,13 @@ function MapCanvas({
   style,
 }) {
   const routeLine = useMemo(() => {
-    if (!originCoords || !destCoords) return [];
-    return [originCoords, destCoords];
-  }, [originCoords, destCoords]);
+    if (originCoords && destCoords) return [originCoords, destCoords];
+    if (passengerCoords && destCoords) return [passengerCoords, destCoords];
+    return [];
+  }, [originCoords, destCoords, passengerCoords]);
+
+  const routeFrom = routeLine[0] ?? null;
+  const routeTo = routeLine[1] ?? null;
 
   const initialRegion = useMemo(() => {
     if (passengerCoords) {
@@ -479,12 +484,22 @@ function MapCanvas({
       onLayout={onLayout}
       onRegionChangeComplete={ANDROID_SAFE_MAP ? undefined : onRegionChange}>
       {routeLine.length === 2 ? (
-        <SafePolyline
-          coordinates={routeLine}
-          strokeColor={Theme.colors.passenger + '88'}
-          strokeWidth={3}
-          lineDashPattern={ANDROID_SAFE_MAP ? undefined : [8, 6]}
-        />
+        <>
+          <SafePolyline
+            coordinates={routeLine}
+            strokeColor={Theme.colors.passenger + 'CC'}
+            strokeWidth={4}
+            lineCap="round"
+            lineJoin="round"
+            zIndex={1}
+          />
+          <RouteDirectionArrow
+            from={routeFrom}
+            to={routeTo}
+            color={Theme.colors.passenger}
+            zIndex={6}
+          />
+        </>
       ) : null}
 
       {originCoords ? (

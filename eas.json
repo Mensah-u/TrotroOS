@@ -14,6 +14,10 @@
     "preview": {
       "developmentClient": false,
       "distribution": "internal",
+      "env": {
+        "SENTRY_ORG": "trotroos",
+        "SENTRY_PROJECT": "react-native"
+      },
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease"
@@ -22,6 +26,10 @@
     "production": {
       "developmentClient": false,
       "distribution": "store",
+      "env": {
+        "SENTRY_ORG": "trotroos",
+        "SENTRY_PROJECT": "react-native"
+      },
       "android": {
         "buildType": "app-bundle"
       }

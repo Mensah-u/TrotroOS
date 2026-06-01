@@ -24,7 +24,7 @@ const FAQ = [
   { q: 'Do I need an account?', a: 'No — passengers ride anonymously. Mates (drivers) sign up on the Mate tab.' },
   { q: 'Why does TrotroOS need my location?', a: 'So the mate can see where you are waiting on the map. You can turn this off in Profile → Privacy.' },
   { q: 'How do I rate my driver?', a: 'After your trip ends, a rating popup appears automatically. You can also view past ratings under Profile → My Ratings.' },
-  { q: 'Is payment handled in the app?', a: 'Not yet — pay your mate in cash (mobile money coming soon).' },
+  { q: 'Is payment handled in the app?', a: 'Payment is made directly to your mate in cash. In-app mobile money payments are planned for a future release.' },
   { q: 'How do I contact support?', a: 'Profile → Contact Support, or call the support line. Hours: Mon–Sat, 7 AM – 9 PM.' },
   { q: 'Can I drive as a mate?', a: 'Yes — Profile → Switch to Mate, create a mate account, and publish live trips from the Dashboard.' },
 ];

@@ -161,6 +161,9 @@ DROP POLICY IF EXISTS "Scheduled demand passenger own" ON public.scheduled_deman
 DROP POLICY IF EXISTS "Scheduled demand mate read active" ON public.scheduled_demand;
 DROP POLICY IF EXISTS "Push tokens passenger own" ON public.push_tokens;
 DROP POLICY IF EXISTS "Push tokens mate own" ON public.push_tokens;
+DROP POLICY IF EXISTS "push_tokens_passenger_own" ON public.push_tokens;
+DROP POLICY IF EXISTS "push_tokens_passenger_authenticated_own" ON public.push_tokens;
+DROP POLICY IF EXISTS "push_tokens_mate_own" ON public.push_tokens;
 DROP POLICY IF EXISTS "Favorite routes passenger own" ON public.passenger_favorite_routes;
 DROP POLICY IF EXISTS "Safety reports insert" ON public.safety_reports;
 DROP POLICY IF EXISTS "Safety reports read own" ON public.safety_reports;

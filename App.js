@@ -16,7 +16,8 @@ import BrandedLoader from './components/BrandedLoader';
 import WebAppShell from './components/WebAppShell';
 import { I18nProvider } from './context/I18nContext';
 import { loadStaticData, refreshStaticData } from './services/staticData';
-import { recordEvent, recordError, initMonitoring } from './services/monitoring';
+import { initMonitoring, recordEvent, recordError, setUser, wrapAppWithMonitoring } from './services/monitoring';
+import { getOrCreateDeviceId } from './services/passengerProfile';
 import { parseAppDeepLink } from './services/shareLinks';
 import { setPendingRidePrefill } from './services/deepLinkStore';
 import { flushOfflineQueue } from './services/offlineQueue';
@@ -28,6 +29,7 @@ import { TAB_BAR_CLEARANCE } from './constants/layout';
 import { Theme, glowShadow } from './constants/theme';
 import MateAuthScreen from './screens/auth/MateAuthScreen';
 import FindRideScreen from './screens/FindRideScreen';
+import PassengerRideRequestWatcher from './components/PassengerRideRequestWatcher';
 import MateScreen from './screens/MateScreen';
 import MateAccountScreen from './screens/MateAccountScreen';
 import MateProfileScreen from './screens/MateProfileScreen';
@@ -173,34 +175,37 @@ function ProfileTabStack() {
 
 function PassengerApp() {
   return (
-    <PassengerTab.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: Theme.colors.passenger,
-        tabBarInactiveTintColor: Theme.colors.textMuted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
-        tabBarStyle: floatingTabBar(Theme.colors.passenger),
-        sceneContainerStyle: { paddingBottom: TAB_BOTTOM },
-      }}>
-      <PassengerTab.Screen
-        name="Find Ride"
-        component={FindRideScreen}
-        options={{
-          tabBarIcon: ({ focused, color }) => (
-            <TabIcon focused={focused} color={color} name={focused ? 'search' : 'search-outline'} accent={Theme.colors.passenger} />
-          ),
-        }}
-      />
-      <PassengerTab.Screen
-        name="Profile"
-        component={ProfileTabStack}
-        options={{
-          tabBarIcon: ({ focused, color }) => (
-            <TabIcon focused={focused} color={color} name={focused ? 'person' : 'person-outline'} accent={Theme.colors.passenger} />
-          ),
-        }}
-      />
-    </PassengerTab.Navigator>
+    <>
+      <PassengerRideRequestWatcher />
+      <PassengerTab.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: Theme.colors.passenger,
+          tabBarInactiveTintColor: Theme.colors.textMuted,
+          tabBarLabelStyle: { fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
+          tabBarStyle: floatingTabBar(Theme.colors.passenger),
+          sceneContainerStyle: { paddingBottom: TAB_BOTTOM },
+        }}>
+        <PassengerTab.Screen
+          name="Find Ride"
+          component={FindRideScreen}
+          options={{
+            tabBarIcon: ({ focused, color }) => (
+              <TabIcon focused={focused} color={color} name={focused ? 'search' : 'search-outline'} accent={Theme.colors.passenger} />
+            ),
+          }}
+        />
+        <PassengerTab.Screen
+          name="Profile"
+          component={ProfileTabStack}
+          options={{
+            tabBarIcon: ({ focused, color }) => (
+              <TabIcon focused={focused} color={color} name={focused ? 'person' : 'person-outline'} accent={Theme.colors.passenger} />
+            ),
+          }}
+        />
+      </PassengerTab.Navigator>
+    </>
   );
 }
 
@@ -249,11 +254,16 @@ function MateApp() {
 function AppRoot() {
   const session = useAppSession();
 
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
   // Warm the offline-first static data cache (routes / places / fares).
   // Non-blocking — bundled snapshot is already available synchronously.
   useEffect(() => {
     initMonitoring();
     recordEvent('app_boot');
+    getOrCreateDeviceId().catch((e) => recordError(e, { where: 'getOrCreateDeviceId' }));
     loadStaticData().catch((e) => recordError(e, { where: 'loadStaticData' }));
 
     const handleUrl = (url) => {
@@ -294,6 +304,20 @@ function AppRoot() {
     }
   }, [session.phase]);
 
+  useEffect(() => {
+    if (session.phase === 'loading') return undefined;
+    (async () => {
+      const deviceId = await getOrCreateDeviceId().catch(() => null);
+      setUser({
+        deviceId: deviceId ?? undefined,
+        role: session.role ?? 'unknown',
+        id: deviceId ?? session.role ?? 'anonymous',
+      });
+      recordEvent('session_ready', { role: session.role, phase: session.phase });
+    })();
+    return undefined;
+  }, [session.phase, session.role]);
+
   if (session.phase === 'loading') {
     return <BrandedLoader message="Starting TrotroOS" />;
   }
@@ -306,13 +330,6 @@ function AppRoot() {
   }
 
   if (session.phase === 'auth' && session.role === ROLES.MATE) {
-    if (Platform.OS === 'web') {
-      return (
-        <WebLandingScreen
-          onBookRide={() => session.selectRole(ROLES.PASSENGER)}
-        />
-      );
-    }
     return (
       <MateAuthScreen onSuccess={session.completeAuth} onBack={session.switchRole} />
     );
@@ -325,9 +342,6 @@ function AppRoot() {
   }
 
   if (session.phase === 'app' && session.role === ROLES.MATE) {
-    if (Platform.OS === 'web') {
-      return <PassengerApp />;
-    }
     return <MateApp />;
   }
 
@@ -338,7 +352,7 @@ function AppRoot() {
   return <WelcomeScreen onSelectRole={session.selectRole} />;
 }
 
-export default function App() {
+function App() {
   const session = useAppSessionState();
   const webMarketing =
     Platform.OS === 'web'
@@ -364,3 +378,5 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+
+export default wrapAppWithMonitoring(App);

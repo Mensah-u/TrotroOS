@@ -108,14 +108,7 @@ export function findRouteIdByLabel(label) {
   if (!label) return null;
   const normalized = label.trim().toLowerCase();
   const exact = routes.find((r) => formatRoute(r).toLowerCase() === normalized);
-  if (exact) return exact.id;
-  const partial = routes.find(
-    (r) =>
-      normalized.includes(r.destination.toLowerCase()) ||
-      normalized.includes(r.origin.toLowerCase()) ||
-      normalized.includes(formatRoute(r).toLowerCase()),
-  );
-  return partial?.id ?? null;
+  return exact?.id ?? null;
 }
 
 export function getRouteFare(route) {

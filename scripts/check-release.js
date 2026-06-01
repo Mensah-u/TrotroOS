@@ -9,6 +9,23 @@
 const fs = require('fs');
 const path = require('path');
 
+/** Load .env for local preflight (does not override non-empty env vars). */
+function loadDotEnv() {
+  const envPath = path.join(process.cwd(), '.env');
+  if (!fs.existsSync(envPath)) return;
+  let content = fs.readFileSync(envPath, 'utf8').replace(/^\uFEFF/, '');
+  for (const line of content.split(/\r?\n/)) {
+    if (/^\s*(#|$)/.test(line)) continue;
+    const m = line.match(/^([^=]+)=(.*)$/);
+    if (!m) continue;
+    const key = m[1].trim();
+    const val = m[2].trim().replace(/^["']|["']$/g, '');
+    if (val && !process.env[key]?.trim()) process.env[key] = val;
+  }
+}
+
+loadDotEnv();
+
 const ROOTS = ['screens', 'components', 'services', 'constants', 'hooks'];
 const SUFFIXES = ['.js', '.jsx', '.ts', '.tsx'];
 
@@ -106,18 +123,18 @@ const storeAssets = [
 ];
 for (const asset of storeAssets) {
   if (!fs.existsSync(asset)) {
-    warnings.push(`Missing store asset: ${asset} (required before Play submission)`);
+    warnings.push(`Missing store asset: ${asset} — run: npm run generate:store-assets`);
   }
 }
 
-// Privacy policy hosted URL (warn only — set in EAS for production)
-if (!process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL) {
-  warnings.push('EXPO_PUBLIC_PRIVACY_POLICY_URL not set — host docs/PRIVACY_POLICY.md before Play submission');
+// Privacy policy — static page ships with web build; URL defaults to trotroos.com/privacy
+if (!fs.existsSync('public/privacy.html')) {
+  warnings.push('Missing public/privacy.html — required for hosted privacy policy');
 }
 
-// Sentry for production
+// Sentry for production (required before Play Store production track)
 if (!process.env.EXPO_PUBLIC_SENTRY_DSN) {
-  warnings.push('EXPO_PUBLIC_SENTRY_DSN not set — recommended for production crash monitoring');
+  warnings.push('EXPO_PUBLIC_SENTRY_DSN not set — required for production crash monitoring (create free project at sentry.io)');
 }
 
 // Placeholder icon check (grid template in default Expo assets)

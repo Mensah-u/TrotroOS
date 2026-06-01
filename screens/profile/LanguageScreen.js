@@ -8,6 +8,7 @@ import ProfileHeader from '@/components/ProfileHeader';
 import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { Theme } from '@/constants/theme';
 import { LANGUAGES, getAppPreferences, saveAppPreferences } from '@/services/appPreferences';
+import { refreshHapticsPreference } from '@/utils/haptics';
 import { useI18n } from '@/context/I18nContext';
 
 export default function LanguageScreen({ navigation }) {
@@ -78,7 +79,10 @@ export default function LanguageScreen({ navigation }) {
             </View>
             <Switch
               value={haptics}
-              onValueChange={(v) => { setHaptics(v); saveAppPreferences({ haptics: v }); }}
+              onValueChange={(v) => {
+                setHaptics(v);
+                saveAppPreferences({ haptics: v }).then(() => refreshHapticsPreference());
+              }}
               trackColor={{ false: '#333', true: 'rgba(243,111,33,0.5)' }}
               thumbColor={haptics ? Theme.colors.passenger : '#888'}
             />

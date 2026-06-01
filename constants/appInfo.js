@@ -11,10 +11,5 @@ export const FEEDBACK_EMAIL = 'feedback@trotroos.com';
 
 export const SUPPORT_HOURS = 'Mon–Sat · 7:00 AM – 9:00 PM GMT';
 
-/**
- * Public HTTPS URL for Google Play Console (required before submission).
- * Set EXPO_PUBLIC_PRIVACY_POLICY_URL in EAS secrets or .env when hosting
- * docs/PRIVACY_POLICY.md (e.g. GitHub Pages, trotroos.com/privacy).
- */
-export const PRIVACY_POLICY_URL =
-  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_PRIVACY_POLICY_URL) || '';
+/** Public HTTPS URL for Google Play Console — hosted at trotroos.com/privacy by default. */
+export { PRIVACY_POLICY_URL } from '@/constants/config';

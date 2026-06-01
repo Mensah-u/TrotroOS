@@ -53,6 +53,12 @@ export const API_KEY = pick('EXPO_PUBLIC_API_KEY', 'apiKey', 'API_KEY');
 
 export const SENTRY_DSN = pick('EXPO_PUBLIC_SENTRY_DSN', 'sentryDsn', 'SENTRY_DSN');
 
+export const PRIVACY_POLICY_URL = pick(
+  'EXPO_PUBLIC_PRIVACY_POLICY_URL',
+  'privacyPolicyUrl',
+  'PRIVACY_POLICY_URL',
+) || 'https://trotroos.com/privacy';
+
 export function assertClientConfig() {
   const missing = [];
   if (!SUPABASE_URL) missing.push('SUPABASE_URL');

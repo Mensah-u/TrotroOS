@@ -24,6 +24,7 @@ import {
   createScheduledDemand,
   fetchScheduledDemand,
 } from '@/services/featuresV14';
+import { formatUserError } from '@/utils/supabaseErrors';
 import { getOrCreateDeviceId } from '@/services/passengerProfile';
 
 function formatWhen(iso) {
@@ -75,7 +76,7 @@ export default function ScheduledRideScreen({ navigation }) {
       ? new Date(scheduledAt)
       : new Date(Date.now() + 60 * 60 * 1000);
     if (Number.isNaN(when.getTime())) {
-      Alert.alert('Invalid time', 'Use format: 2026-05-28 07:30 or leave blank for +1 hour.');
+      Alert.alert('Invalid time', 'Use a date and time like 2026-05-28 07:30, or leave blank to schedule one hour from now.');
       return;
     }
     setSaving(true);
@@ -88,11 +89,11 @@ export default function ScheduledRideScreen({ navigation }) {
         scheduledAt: when.toISOString(),
       });
       if (error) throw error;
-      Alert.alert('Scheduled', 'Mates will see your demand closer to that time.');
+      Alert.alert('Ride scheduled', 'Your commute request has been saved. Mates planning that route may see it when they go live.');
       setScheduledAt('');
       reload();
     } catch (e) {
-      Alert.alert('Could not schedule', e.message ?? 'Run supabase/FIX_v14_features.sql first.');
+      Alert.alert('Unable to schedule ride', formatUserError(e, 'We could not save your scheduled ride. Please try again.'));
     } finally {
       setSaving(false);
     }
@@ -126,11 +127,11 @@ export default function ScheduledRideScreen({ navigation }) {
               </View>
             </>
           ) : null}
-          <Text style={styles.label}>When (optional ISO/local)</Text>
+          <Text style={styles.label}>Departure time (optional)</Text>
           <TextInput
             value={scheduledAt}
             onChangeText={setScheduledAt}
-            placeholder="Leave blank = 1 hour from now"
+            placeholder="e.g. 2026-05-28 07:30 — or leave blank for one hour from now"
             placeholderTextColor={Theme.colors.textMuted}
             style={styles.input}
           />
@@ -161,9 +162,15 @@ export default function ScheduledRideScreen({ navigation }) {
                 </Text>
               </View>
               <Pressable
-                onPress={() =>
-                  cancelScheduledDemand(item.id, deviceId).then(reload)
-                }>
+                onPress={async () => {
+                  const id = deviceId ?? (await getOrCreateDeviceId());
+                  const { error } = await cancelScheduledDemand(item.id, id);
+                  if (error) {
+                    Alert.alert('Unable to cancel', formatUserError(error, 'We could not cancel this scheduled ride.'));
+                    return;
+                  }
+                  reload();
+                }}>
                 <Text style={styles.cancel}>Cancel</Text>
               </Pressable>
             </View>

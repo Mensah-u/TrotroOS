@@ -18,7 +18,7 @@ internal to closed/open testing. The goal: zero rejections, ever.
       ```bash
       keytool -list -v -keystore secrets/trotroos-upload.jks
       ```
-- [ ] `app.json` is in sync (currently `versionCode: 7`, `version: "1.3.0"`).
+- [ ] `app.json` is in sync (currently `versionCode: 8`, `version: "1.4.0"`).
       Every Play upload **must** bump `versionCode`. Bump `version` (the user-
       visible name) whenever there's a meaningful feature/bugfix release.
 
@@ -78,8 +78,8 @@ install via the Play Store link.
 - [ ] **No background location**. We disabled it explicitly in `app.json`
       via `isAndroidBackgroundLocationEnabled: false` and listed
       `ACCESS_BACKGROUND_LOCATION` under `blockedPermissions`.
-- [ ] No ads, no UGC, no in-app purchases in v1.3.0 (fares paid to mate in cash/MoMo on board).
-- [ ] Privacy Policy URL returns 200 on mobile — set `EXPO_PUBLIC_PRIVACY_POLICY_URL` in EAS secrets; in-app copy at Profile → Privacy Policy.
+- [ ] No ads, no UGC, no in-app purchases in v1.4.0 (fares paid to mate in cash/MoMo on board).
+- [ ] Privacy Policy URL returns 200 on mobile — default `https://trotroos.com/privacy` (see `public/privacy.html`); set `EXPO_PUBLIC_PRIVACY_POLICY_URL` in EAS if using a custom domain.
 - [ ] Data & privacy screen works (export, clear cache, deletion request email).
 
 ## 7. Distribution
@@ -111,7 +111,7 @@ install via the Play Store link.
 - [ ] Privacy Policy URL returns 200 and renders on mobile (test on device).
 - [ ] App opens to a working screen within 5 seconds on a mid-range device.
 - [ ] No placeholder strings in the UI (search for `TODO`, `Lorem`, `Test User`).
-- [ ] Set `EXPO_PUBLIC_SENTRY_DSN` and `npx expo install sentry-expo` for production crash reports.
+- [ ] Set `EXPO_PUBLIC_SENTRY_DSN` in EAS secrets and verify `sentry-expo` is installed (`npm ls sentry-expo`).
 
 ## 10. Sanity script
 

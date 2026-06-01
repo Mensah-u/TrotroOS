@@ -55,14 +55,14 @@ export default function InviteFriendsScreen({ navigation }) {
     if (Clipboard?.setStringAsync) {
       try {
         await Clipboard.setStringAsync(referralCode);
-        Alert.alert('Copied', `${referralCode} copied to clipboard.`);
+        Alert.alert('Copied to clipboard', `Invite code: ${referralCode}`);
         return;
       } catch {}
     }
     try {
       await Share.share({ message: referralCode, title: 'Invite code' });
     } catch {
-      Alert.alert('Code', referralCode);
+      Alert.alert('Invite code', referralCode);
     }
   };
 
@@ -79,14 +79,14 @@ export default function InviteFriendsScreen({ navigation }) {
     if (Clipboard?.setStringAsync) {
       try {
         await Clipboard.setStringAsync(link);
-        Alert.alert('Copied', `${link} copied to clipboard.`);
+        Alert.alert('Copied to clipboard', 'Invite link copied.');
         return;
       } catch {}
     }
     try {
       await Share.share({ message: link, title: 'TrotroOS link' });
     } catch {
-      Alert.alert('Link', link);
+      Alert.alert('Invite link', link);
     }
   };
 

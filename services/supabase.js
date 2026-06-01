@@ -56,8 +56,8 @@ function supabaseFetch(url, options = {}) {
     headers.set('x-device-id', passengerDeviceId);
   }
   const init = { ...options, headers };
-  if (!init.signal && !__DEV__) {
-    init.signal = requestTimeoutSignal(15_000);
+  if (!init.signal) {
+    init.signal = requestTimeoutSignal(__DEV__ ? 12_000 : 15_000);
   }
   return fetch(url, init);
 }
@@ -96,7 +96,19 @@ export const signInMate = (email, password) =>
   supabase.auth.signInWithPassword({ email, password });
 export const signOutMate = () => supabase.auth.signOut();
 export const getCurrentMate = () => supabase.auth.getUser();
-export const getMateSession = () => supabase.auth.getSession();
+export async function getMateSession() {
+  try {
+    const result = await Promise.race([
+      supabase.auth.getSession(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Session check timed out')), 8000);
+      }),
+    ]);
+    return result;
+  } catch {
+    return { data: { session: null }, error: null };
+  }
+}
 
 // ─── Mate profiles ───────────────────────────────────────────────────────────
 export function getMateProfile(userId) {
@@ -149,7 +161,7 @@ export async function upsertDriverLocation(
   fareGhs = null,
 ) {
   const { user, error: authError } = await requireMateSession();
-  if (authError) return Promise.reject(new Error(authError.message));
+  if (authError) return { data: null, error: authError };
 
   const fare =
     fareGhs != null && Number(fareGhs) > 0 ? Number(fareGhs) : null;
@@ -177,7 +189,7 @@ export async function upsertDriverLocation(
 
 export async function deleteDriverLocation(_mateId) {
   const { user, error: authError } = await requireMateSession();
-  if (authError) return Promise.reject(new Error(authError.message));
+  if (authError) return { data: null, error: authError };
   return supabase.from(T.DRIVER_LOCATIONS).delete().eq('mate_id', user.id);
 }
 
@@ -302,6 +314,11 @@ async function requireMateSession() {
   return { user: session.user, error: null };
 }
 
+export function isMateAuthError(error) {
+  const msg = typeof error === 'string' ? error : error?.message;
+  return /not signed in/i.test(msg ?? '');
+}
+
 export async function createTrip(_mateId, route, origin, destination, totalSeats, fareGhs = null) {
   const { user, error: authError } = await requireMateSession();
   if (authError) return { data: null, error: authError };
@@ -409,7 +426,7 @@ export async function updateTripFare(tripId, fareGhs) {
 
 export async function updateTripSeats(tripId, newAvailableSeats, status) {
   const { error: authError } = await requireMateSession();
-  if (authError) return Promise.reject(new Error(authError.message));
+  if (authError) return { data: null, error: authError };
 
   const patch = { available_seats: newAvailableSeats };
   if (status !== undefined) patch.status = status;
@@ -418,7 +435,7 @@ export async function updateTripSeats(tripId, newAvailableSeats, status) {
 
 export async function endTrip(tripId) {
   const { error: authError } = await requireMateSession();
-  if (authError) return Promise.reject(new Error(authError.message));
+  if (authError) return { data: null, error: authError };
 
   return supabase.from(T.TRIPS).update({ status: 'completed', available_seats: 0 }).eq('id', tripId);
 }
@@ -680,7 +697,7 @@ export async function ensurePassengerProfileExists(deviceId) {
       ok: false,
       error: {
         message:
-          'Could not save passenger profile. Run supabase/FIX_passenger_profiles_and_reservations.sql in Supabase SQL Editor.',
+          'We could not save your passenger profile. Please try again or contact support if this continues.',
       },
     };
   }
@@ -708,7 +725,7 @@ export async function createReservation(tripId, passengerId = null) {
         data: null,
         error: {
           message:
-            'Passenger profile table is missing in Supabase. Run supabase/FIX_passenger_profiles_and_reservations.sql in the SQL Editor.',
+            'Passenger profiles are temporarily unavailable. Please try again later or contact support.',
         },
       };
     }
@@ -771,7 +788,7 @@ export async function getActiveMateTrip(_mateId) {
 export function subscribeToReservations(tripId, callback) {
   const fetchAll = async () => {
     const { data, error } = await fetchMateTripReservations(tripId);
-    if (error) {
+    if (error && !isMateAuthError(error)) {
       console.warn('[Mate] reservations sync failed:', error.message ?? error);
     }
     callback({ type: 'sync', reservations: data ?? [] });

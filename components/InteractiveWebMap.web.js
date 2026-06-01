@@ -124,13 +124,26 @@ const InteractiveWebMap = forwardRef(function InteractiveWebMap(
       polylineRef.current = null;
     }
     if (polyline.length >= 2) {
+      const path = polyline.map((p) => ({ lat: p.latitude, lng: p.longitude }));
       polylineRef.current = new maps.Polyline({
         map,
-        path: polyline.map((p) => ({ lat: p.latitude, lng: p.longitude })),
+        path,
         strokeColor: '#66BB6A',
-        strokeOpacity: 0.75,
-        strokeWeight: 3,
+        strokeOpacity: 0.85,
+        strokeWeight: 4,
         geodesic: true,
+        icons: [
+          {
+            icon: {
+              path: maps.SymbolPath.FORWARD_CLOSED_ARROW,
+              scale: 3.5,
+              strokeColor: '#66BB6A',
+              fillColor: '#66BB6A',
+              fillOpacity: 1,
+            },
+            offset: '62%',
+          },
+        ],
       });
     }
   }, [polyline]);

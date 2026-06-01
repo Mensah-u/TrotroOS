@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import BrandedLoader from '@/components/BrandedLoader';
 import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { formatRoute, getRouteFare, routes } from '@/constants/routes';
+import { formatSupabaseError } from '@/utils/supabaseErrors';
 import { getOrCreateDeviceId } from '@/services/passengerProfile';
 import {
   cancelReservation,
@@ -259,7 +260,7 @@ export default function TripHistoryScreen({ navigation }) {
             if (!did) return;
             const { ok } = await cancelReservation(reservation.id, did);
             if (!ok) {
-              Alert.alert('Could not close ride', 'Try again in a moment.');
+              Alert.alert('Unable to close ride', 'Please try again in a moment.');
               return;
             }
             loadHistory(false);
@@ -279,13 +280,13 @@ export default function TripHistoryScreen({ navigation }) {
           text: 'Close trip',
           style: 'destructive',
           onPress: async () => {
-            try {
-              await endTrip(trip.id);
-              await deleteDriverLocation(mateUserId).catch(() => {});
-              loadHistory(false);
-            } catch {
-              Alert.alert('Could not close trip', 'Make sure you are signed in as a mate and try again.');
+            const { error: endErr } = await endTrip(trip.id);
+            if (endErr) {
+              Alert.alert('Unable to close trip', formatSupabaseError(endErr.message ?? 'Please sign in as a mate and try again.'));
+              return;
             }
+            await deleteDriverLocation(mateUserId);
+            loadHistory(false);
           },
         },
       ],

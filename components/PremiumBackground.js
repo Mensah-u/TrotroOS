@@ -40,7 +40,12 @@ export default function PremiumBackground({
         ? Theme.colors.passengerGlow
         : 'rgba(243,111,33,0.22)';
 
-  const orbColor2 = 'rgba(243,111,33,0.08)';
+  const orbColor2 =
+    variant === 'mate'
+      ? 'rgba(33,150,243,0.1)'
+      : variant === 'passenger'
+        ? 'rgba(102,187,106,0.1)'
+        : 'rgba(243,111,33,0.08)';
 
   return (
     <View style={[styles.root, style]}>

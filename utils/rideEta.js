@@ -108,7 +108,7 @@ export function estimatePickupEta({
   }
 
   const catalog = catalogDuration(routeMeta, 'pickupEta');
-  if (catalog) return { ...catalog, confidence: 'approx' };
+  if (catalog && routeMeta?.id && !routeMeta?.isCustom) return { ...catalog, confidence: 'approx' };
 
   return {
     minMinutes: 5,
@@ -137,12 +137,19 @@ export function estimateTripDuration({
     const distanceKm = haversineKm(from, to);
     const computed = durationFromDistanceKm(distanceKm, { kind: 'trip' });
     if (computed) {
-      const catalog = catalogDuration(routeMeta, 'tripEta');
-      if (catalog && routeMeta?.id) {
-        const catalogMid = (catalog.minMinutes + catalog.maxMinutes) / 2;
-        const computedMid = (computed.minMinutes + computed.maxMinutes) / 2;
-        if (Math.abs(catalogMid - computedMid) <= 8) {
-          return { ...catalog, confidence: 'catalog' };
+      const useCatalog =
+        routeMeta?.id &&
+        !routeMeta?.isCustom &&
+        !String(routeMeta.id).startsWith('custom_') &&
+        !String(routeMeta.id).startsWith('live_');
+      if (useCatalog) {
+        const catalog = catalogDuration(routeMeta, 'tripEta');
+        if (catalog) {
+          const catalogMid = (catalog.minMinutes + catalog.maxMinutes) / 2;
+          const computedMid = (computed.minMinutes + computed.maxMinutes) / 2;
+          if (Math.abs(catalogMid - computedMid) <= 8) {
+            return { ...catalog, confidence: 'catalog' };
+          }
         }
       }
       return computed;

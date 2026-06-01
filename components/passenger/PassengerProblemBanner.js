@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 
+import LivePulse from '@/components/LivePulse';
+import { SkeletonLine } from '@/components/Skeleton';
 import { PASSENGER } from '@/constants/problemSolution';
 import { SCREEN_GUTTER } from '@/constants/layout';
 import { Theme } from '@/constants/theme';
@@ -15,8 +17,12 @@ export default function PassengerProblemBanner({ phase, liveCount = 0 }) {
     return (
       <View style={[styles.wrap, styles.wrapCompact]}>
         <View style={styles.loadingRow}>
-          <Ionicons name="radio-outline" size={16} color={Theme.colors.passenger} />
+          <LivePulse color={Theme.colors.passengerMap} size={8} />
           <Text style={styles.loadingText}>{PASSENGER.loadingLive}</Text>
+        </View>
+        <View style={styles.skeletonRow}>
+          <SkeletonLine width="100%" />
+          <SkeletonLine width="68%" style={styles.skeletonGap} />
         </View>
       </View>
     );
@@ -25,7 +31,10 @@ export default function PassengerProblemBanner({ phase, liveCount = 0 }) {
   if (phase === 'results') {
     return (
       <View style={[styles.wrap, styles.wrapCompact]}>
-        <Text style={styles.resultsText}>{PASSENGER.routeScanning(liveCount)}</Text>
+        <View style={styles.resultsRow}>
+          <Ionicons name="radio" size={15} color={Theme.colors.passengerMap} />
+          <Text style={styles.resultsText}>{PASSENGER.routeScanning(liveCount)}</Text>
+        </View>
       </View>
     );
   }
@@ -38,21 +47,15 @@ const styles = StyleSheet.create({
     marginHorizontal: SCREEN_GUTTER,
     marginBottom: 12,
     padding: 16,
-    borderRadius: 16,
-    backgroundColor: Theme.colors.surface,
+    borderRadius: Theme.radius.lg,
+    backgroundColor: Theme.colors.surfaceUp,
     borderWidth: 1,
     borderColor: Theme.colors.passenger + '33',
   },
   wrapCompact: {
-    paddingVertical: 10,
+    paddingVertical: 12,
     paddingHorizontal: 14,
     marginBottom: 8,
-  },
-  heroTitle: {
-    color: Theme.colors.text,
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: -0.3,
   },
   loadingRow: {
     flexDirection: 'row',
@@ -65,7 +68,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  skeletonRow: { marginTop: 12, gap: 8 },
+  skeletonGap: { marginTop: 0 },
+  resultsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   resultsText: {
+    flex: 1,
     color: Theme.colors.text,
     fontSize: 14,
     fontWeight: '700',

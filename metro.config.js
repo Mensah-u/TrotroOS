@@ -1,7 +1,14 @@
 const path = require('path');
 const { getDefaultConfig } = require('expo/metro-config');
+const { getSentryExpoConfig } = require('@sentry/react-native/metro');
 
-const config = getDefaultConfig(__dirname);
+const projectRoot = __dirname;
+const config = getDefaultConfig(projectRoot);
+
+config.resolver.alias = {
+  ...(config.resolver.alias ?? {}),
+  '@': projectRoot,
+};
 
 const useNotificationsStub = process.env.EAS_BUILD !== 'true';
 
@@ -19,4 +26,10 @@ if (useNotificationsStub) {
   };
 }
 
-module.exports = config;
+config.cacheVersion = 'trotro-v1.4.0-dev';
+
+// Sentry Metro wrapper slows local bundling; use only for EAS/release builds.
+module.exports =
+  process.env.EAS_BUILD === 'true'
+    ? getSentryExpoConfig(projectRoot, config)
+    : config;

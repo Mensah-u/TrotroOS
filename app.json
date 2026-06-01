@@ -75,7 +75,7 @@
       "eas": {
         "projectId": "e5b35d55-67bc-4136-b257-1d9886669ad8"
       },
-      "privacyPolicyNote": "Set EXPO_PUBLIC_PRIVACY_POLICY_URL in EAS for Play Console"
+      "privacyPolicyNote": "Privacy policy: public/privacy.html → https://trotroos.com/privacy"
     },
     "owner": "mensah-u"
   }

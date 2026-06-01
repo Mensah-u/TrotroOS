@@ -48,20 +48,20 @@ export const Theme = {
   colors: {
     ...Brand,
     ...RoleColors,
-    bgElevated: Brand.bg,
+    bgElevated: '#161616',
     surface: Brand.card,
-    surfaceUp: Brand.card,
-    glass: 'rgba(255,255,255,0.04)',
+    surfaceUp: '#242424',
+    glass: 'rgba(255,255,255,0.06)',
     border: 'rgba(255,255,255,0.08)',
-    borderStrong: 'rgba(255,255,255,0.14)',
+    borderStrong: 'rgba(255,255,255,0.16)',
     textSub: Brand.textSoft,
     textMuted: '#A8A8A8',
     mate: Brand.primary,
-    mateSoft: 'rgba(243,111,33,0.14)',
-    mateGlow: 'rgba(243,111,33,0.45)',
+    mateSoft: 'rgba(243,111,33,0.16)',
+    mateGlow: 'rgba(243,111,33,0.5)',
     passenger: Brand.primary,
-    passengerSoft: 'rgba(243,111,33,0.14)',
-    passengerGlow: 'rgba(243,111,33,0.45)',
+    passengerSoft: 'rgba(102,187,106,0.14)',
+    passengerGlow: 'rgba(102,187,106,0.35)',
     successSoft: 'rgba(76,175,80,0.12)',
     errorSoft: 'rgba(255,82,82,0.12)',
     danger: RoleColors.error,
@@ -108,6 +108,12 @@ export const Theme = {
     caption: { fontSize: 12, fontWeight: '600' },
     label: { fontSize: 11, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase' },
   },
+
+  motion: {
+    fast: 180,
+    normal: 320,
+    slow: 600,
+  },
 };
 
 export const darkMapStyle = [
@@ -135,8 +141,8 @@ export function glowShadow(color, opacity = 0.4) {
 /** Shared screen palette — import instead of duplicating hex values. */
 export const C = {
   BG: Brand.bg,
-  SURFACE: Brand.card,
-  SURFACE_UP: Brand.card,
+  SURFACE: Theme.colors.surface,
+  SURFACE_UP: Theme.colors.surfaceUp,
   BORDER: Theme.colors.border,
   ACCENT: Brand.primary,
   ACCENT_SOFT: Theme.colors.mateSoft,

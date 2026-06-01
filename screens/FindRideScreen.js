@@ -24,11 +24,14 @@ import RouteResultsHeader from '@/components/passenger/RouteResultsHeader';
 import RouteRideCard from '@/components/passenger/RouteRideCard';
 import RoutePlanner from '@/components/RoutePlanner';
 import PassengerProblemBanner from '@/components/passenger/PassengerProblemBanner';
+import EmptyState from '@/components/EmptyState';
+import TripCardSkeleton from '@/components/passenger/TripCardSkeleton';
 import { PASSENGER } from '@/constants/problemSolution';
 import { findRouteByPlaces, formatRoute, getPlaceCoords, getPickupStopsForRoute, routes } from '@/constants/routes';
 import { filterLaunchRoutes } from '@/constants/corridor';
 import { VEHICLE_TYPES, vehicleMatchesFilter } from '@/constants/vehicleTypes';
 import { driverMatchesRoute, tripMatchesRoute } from '@/utils/routeMatching';
+import { formatSupabaseError } from '@/utils/supabaseErrors';
 import { formatTripFare, resolveTripFareGhs } from '@/utils/tripFare';
 import { estimateTripDuration } from '@/utils/rideEta';
 import { TAB_BAR_CLEARANCE, TAB_FOOTER_CLEARANCE, SCREEN_GUTTER } from '@/constants/layout';
@@ -68,7 +71,10 @@ import {
   subscribeToPassengerLocations,
   subscribeToTrips,
   upsertPassengerLocation,
+  setSupabaseDeviceId,
+  supabase,
 } from '@/services/supabase';
+import { subscribeMateRideAccepted } from '@/services/rideRequestBus';
 import { buildDemandFromLocations } from '@/utils/passengerDemand';
 import { C } from '@/constants/theme';
 
@@ -141,6 +147,7 @@ export default function FindRideScreen({ navigation }) {
   const [selectedTripId,      setSelectedTripId]      = useState(null);
   const [vehicleFilter,       setVehicleFilter]       = useState(null);
   const [dismissedTripIds,    setDismissedTripIds]    = useState(() => new Set());
+  const [resultsBootstrapped, setResultsBootstrapped] = useState(false);
 
   const [demandByRoute,  setDemandByRoute] = useState({});
   const [mateAverages,   setMateAverages]  = useState({});
@@ -170,6 +177,10 @@ export default function FindRideScreen({ navigation }) {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
+
+  useEffect(() => {
+    if (deviceId) setSupabaseDeviceId(deviceId);
+  }, [deviceId]);
 
   useEffect(() => {
     (async () => {
@@ -431,6 +442,66 @@ export default function FindRideScreen({ navigation }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
 
+  const applyInviteReservation = useCallback(async (reservation, tripId) => {
+    let card = null;
+    const { data: tripRow } = await fetchTripById(tripId);
+    if (tripRow) {
+      const { data: driver } = await fetchDriverLocationByMateId(tripRow.mate_id);
+      card = {
+        ...tripToCard(tripRow, driver),
+        reservationId: reservation.id,
+        expiresAt: reservation.expires_at,
+      };
+    }
+
+    if (!mountedRef.current) return;
+
+    setIsWaiting(false);
+    setQueuedRouteLabel(null);
+    if (card) {
+      reservedTripRef.current = card;
+      setReservedTrip(card);
+      setFromPlace(card.originStation);
+      setToPlace(card.destination);
+      setShareRouteLabel(card.routeLabel);
+      setRideSheet({ mode: 'active', trip: card });
+    }
+    setReservationExpiresAt(reservation.expires_at);
+    setActiveReservationId(reservation.id);
+    await saveActiveReservationCache({
+      reservationId: reservation.id,
+      tripId: tripId ?? card?.tripId,
+    });
+
+    const coords = passengerCoordsRef?.current ?? passengerCoords;
+    if (coords && deviceId) {
+      await upsertPassengerLocation(
+        deviceId,
+        reservation.id,
+        coords.latitude,
+        coords.longitude,
+        card?.routeLabel ?? queuedRouteLabel,
+        pickupStop ?? card?.originStation ?? fromPlace,
+      ).catch(() => {});
+    }
+  }, [
+    deviceId,
+    fromPlace,
+    passengerCoords,
+    passengerCoordsRef,
+    pickupStop,
+    queuedRouteLabel,
+    setShareRouteLabel,
+  ]);
+
+  // Global PassengerRideRequestWatcher shows alerts; sync UI when passenger accepts.
+  useEffect(() => {
+    return subscribeMateRideAccepted(({ reservation, tripId }) => {
+      if (!reservation?.id) return;
+      applyInviteReservation(reservation, tripId);
+    });
+  }, [applyInviteReservation]);
+
   useEffect(() => {
     if (!countdown || countdown !== 'Expired' || !activeReservationId) return;
     clearReservation();
@@ -638,7 +709,7 @@ export default function FindRideScreen({ navigation }) {
     }
     if (!passengerId) {
       Alert.alert(
-        'Not ready',
+        'Profile still loading',
         'Your passenger profile is still loading. Please wait a moment and try again.',
       );
       return;
@@ -649,7 +720,7 @@ export default function FindRideScreen({ navigation }) {
     try {
       const { data: resData, error: resError } = await createReservation(trip.tripId, passengerId);
       if (resError) {
-        Alert.alert('Reservation failed', resError.message);
+        Alert.alert('Reservation failed', formatSupabaseError(resError.message));
         return;
       }
 
@@ -703,7 +774,7 @@ export default function FindRideScreen({ navigation }) {
       ).catch(() => {});
     }
     await restartBroadcast(null, routeLabel);
-    Alert.alert('In the queue', `Mates on ${routeLabel} can see you're waiting.`);
+    Alert.alert('Added to queue', `Mates on ${routeLabel} can now see that you are waiting.`);
   };
 
   const clearReservation = async () => {
@@ -786,13 +857,32 @@ export default function FindRideScreen({ navigation }) {
     return () => sub.remove();
   }, [showRouteResults, handleBackToRoutePlanner]);
 
+  useEffect(() => {
+    if (!showRouteResults) {
+      setResultsBootstrapped(false);
+      return undefined;
+    }
+    const id = setTimeout(() => setResultsBootstrapped(true), 5000);
+    return () => clearTimeout(id);
+  }, [showRouteResults, fromPlace, toPlace]);
+
   const isActivePassenger = !!activeReservationId || isWaiting;
 
   const problemBannerPhase = useMemo(() => {
-    if (isTrackingReserved || showRouteResults) return 'hidden';
+    if (isTrackingReserved) return 'hidden';
+    if (showRouteResults) {
+      return !resultsBootstrapped && visibleEnrichedTrips.length === 0 ? 'loading' : 'results';
+    }
     if (fromPlace && toPlace) return 'loading';
     return 'idle';
-  }, [isTrackingReserved, showRouteResults, fromPlace, toPlace]);
+  }, [
+    isTrackingReserved,
+    showRouteResults,
+    fromPlace,
+    toPlace,
+    resultsBootstrapped,
+    visibleEnrichedTrips.length,
+  ]);
 
   const headerSubtitle = useMemo(() => {
     if (showRouteResults && !isTrackingReserved) return 'Live trotros on your route';
@@ -858,25 +948,21 @@ export default function FindRideScreen({ navigation }) {
           </Pressable>
         ) : null}
 
-        {showRouteResults && pickupStops.length ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stopsScroll} contentContainerStyle={styles.stopsContent}>
-            {pickupStops.map((stop) => (
-              <Pressable
-                key={stop}
-                onPress={() => setPickupStop(stop)}
-                style={[styles.stopChip, pickupStop === stop && styles.stopChipActive]}>
-                <Text style={[styles.stopChipText, pickupStop === stop && styles.stopChipTextActive]}>{stop}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        ) : null}
-
         {showRouteResults ? (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.stopsScroll}
             contentContainerStyle={styles.stopsContent}>
+            {pickupStops.map((stop) => (
+              <Pressable
+                key={`stop-${stop}`}
+                onPress={() => setPickupStop(stop)}
+                style={[styles.stopChip, pickupStop === stop && styles.stopChipActive]}>
+                <Text style={[styles.stopChipText, pickupStop === stop && styles.stopChipTextActive]}>{stop}</Text>
+              </Pressable>
+            ))}
+            {pickupStops.length ? <View style={styles.chipDivider} /> : null}
             <Pressable
               onPress={() => setVehicleFilter(null)}
               style={[styles.stopChip, !vehicleFilter && styles.stopChipActive]}>
@@ -1044,33 +1130,29 @@ export default function FindRideScreen({ navigation }) {
             />
           }
           ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIcon}>
-                <Ionicons name="bus-outline" size={36} color={C.TEXT_MUTED} />
-              </View>
-              <Text style={styles.emptyTitle}>No mates on this route yet</Text>
-              <Text style={styles.emptySubtitle}>
-                Join the queue for {fromPlace} → {toPlace} and mates will see you waiting.
-                {routeTripDuration?.label ? (
-                  `\nTypical trip: ${routeTripDuration.label}`
-                ) : selectedRouteMeta?.pickupEta ? (
-                  `\nTypical wait: ${selectedRouteMeta.pickupEta.min}–${selectedRouteMeta.pickupEta.max} min`
-                ) : ''}
-              </Text>
-              <Pressable
-                onPress={() => handleQueue(selectedRouteLabel)}
-                style={({ pressed }) => [
-                  styles.queueRouteBtn,
-                  isWaiting && queuedRouteLabel === selectedRouteLabel && styles.queueRouteBtnActive,
-                  pressed && { opacity: 0.88 },
-                ]}>
-                <Ionicons name="time-outline" size={18} color={Theme.colors.passenger} />
-                <Text style={styles.queueRouteBtnText}>
-                  {isWaiting && queuedRouteLabel === selectedRouteLabel ? 'Leave queue' : "I'm waiting on this route"}
-                </Text>
-              </Pressable>
-            </View>
-        }
+            !resultsBootstrapped ? (
+              <TripCardSkeleton count={3} />
+            ) : (
+              <EmptyState
+                icon="bus-outline"
+                iconColor={Theme.colors.passengerMap}
+                title="No mates on this route yet"
+                subtitle={`Join the queue for ${fromPlace} → ${toPlace} and mates will see you waiting.${
+                  routeTripDuration?.label
+                    ? `\nTypical trip: ${routeTripDuration.label}`
+                    : selectedRouteMeta?.pickupEta
+                      ? `\nTypical wait: ${selectedRouteMeta.pickupEta.min}–${selectedRouteMeta.pickupEta.max} min`
+                      : ''
+                }`}
+                actionLabel={
+                  isWaiting && queuedRouteLabel === selectedRouteLabel
+                    ? 'Leave queue'
+                    : "I'm waiting on this route"
+                }
+                onAction={() => handleQueue(selectedRouteLabel)}
+              />
+            )
+          }
       />
       </View>
       ) : null}
@@ -1165,7 +1247,7 @@ export default function FindRideScreen({ navigation }) {
             if (mountedRef.current) setDeviceId(passengerId);
           }
           if (!pendingRating?.tripId || !passengerId) {
-            throw new Error('Still loading your profile. Wait a second and try again.');
+            throw new Error('Your profile is still loading. Please wait a moment and try again.');
           }
           if (!pendingRating.mateId) {
             throw new Error('This trip has no mate to rate.');
@@ -1186,12 +1268,12 @@ export default function FindRideScreen({ navigation }) {
               return;
             }
             if (msg.includes('ratings') && (msg.includes('schema cache') || msg.includes('PGRST205'))) {
-              throw new Error('Ratings are not set up on the server yet.');
+              throw new Error('Ratings are temporarily unavailable. Please try again later.');
             }
-            throw new Error(msg || 'Could not save rating.');
+            throw new Error(formatSupabaseError(msg || 'Could not save your rating.'));
           }
           setPendingRating(null);
-          Alert.alert('Thanks!', 'Your rating helps other riders find great mates.');
+          Alert.alert('Thank you', 'Your rating helps other passengers choose reliable mates.');
         }}
       />
     </SafeAreaView>
@@ -1272,6 +1354,13 @@ const styles = StyleSheet.create({
   },
   shareText: { color: Theme.colors.passenger, fontSize: 13, fontWeight: '700' },
   stopsScroll: { maxHeight: 44, marginBottom: 8 },
+  chipDivider: {
+    width: 1,
+    height: 24,
+    alignSelf: 'center',
+    backgroundColor: Theme.colors.border,
+    marginHorizontal: 4,
+  },
   stopsContent: { paddingHorizontal: SCREEN_GUTTER, gap: 8 },
   stopChip: {
     paddingHorizontal: 12,

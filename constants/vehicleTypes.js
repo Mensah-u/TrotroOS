@@ -48,6 +48,26 @@ export function getSeatLimitsForVehicleType(value) {
   };
 }
 
+/** Mate trip setup — no vehicle-type minimum; mates set their own capacity. */
+export const MATE_PASSENGER_SEATS_MIN = 1;
+export const MATE_PASSENGER_SEATS_MAX = 99;
+
+export function getMatePassengerSeatLimits(value) {
+  const meta = getVehicleTypeMeta(value);
+  return {
+    default: meta.defaultSeats,
+    min: MATE_PASSENGER_SEATS_MIN,
+    max: MATE_PASSENGER_SEATS_MAX,
+  };
+}
+
+export function clampMatePassengerSeats(value, vehicleType) {
+  const { min, max, default: fallback } = getMatePassengerSeatLimits(vehicleType);
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
 export function vehicleMatchesFilter(vehicleType, filterLabel) {
   if (!filterLabel) return true;
   if (!vehicleType) return false;

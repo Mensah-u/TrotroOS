@@ -9,34 +9,42 @@ import ProfileHeader from '@/components/ProfileHeader';
 import { APP_NAME, APP_VERSION } from '@/constants/appInfo';
 import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { Theme } from '@/constants/theme';
-import { supabase } from '@/services/supabase';
+import { runSupabaseDiagnostics } from '@/services/supabaseDiagnostics';
 
 const SAFE_TO_CLEAR_KEYS = [
   'passengerActiveReservation',
   'mateEarningsLog',
 ];
 
-function StatusDot({ ok }) {
-  return <View style={[styles.dot, { backgroundColor: ok ? Theme.colors.success : Theme.colors.danger }]} />;
+function StatusDot({ ok, warn = false }) {
+  const color = ok ? Theme.colors.success : warn ? Theme.colors.gold : Theme.colors.danger;
+  return <View style={[styles.dot, { backgroundColor: color }]} />;
 }
 
 export default function AppDiagnosticsScreen({ navigation }) {
-  const [supabaseOk, setSupabaseOk] = useState(null);
   const [latencyMs, setLatencyMs] = useState(null);
   const [cacheKeys, setCacheKeys] = useState(0);
   const [checking, setChecking] = useState(false);
+  const [deviceId, setDeviceId] = useState(null);
+  const [checks, setChecks] = useState([]);
+  const [allOk, setAllOk] = useState(null);
 
   const runCheck = async () => {
     setChecking(true);
-    setSupabaseOk(null);
-    setLatencyMs(null);
+    setChecks([]);
+    setAllOk(null);
+    setDeviceId(null);
     const started = Date.now();
     try {
-      const { error } = await supabase.from('trips').select('id', { count: 'exact', head: true }).limit(1);
-      setSupabaseOk(!error);
+      const result = await runSupabaseDiagnostics();
+      setDeviceId(result.deviceId);
+      setChecks(result.checks);
+      setAllOk(result.allOk);
       setLatencyMs(Date.now() - started);
-    } catch {
-      setSupabaseOk(false);
+    } catch (e) {
+      setAllOk(false);
+      setChecks([{ name: 'Diagnostics', ok: false, detail: e?.message ?? 'Unknown error' }]);
+      setLatencyMs(Date.now() - started);
     } finally {
       setChecking(false);
     }
@@ -63,7 +71,7 @@ export default function AppDiagnosticsScreen({ navigation }) {
           style: 'destructive',
           onPress: async () => {
             await AsyncStorage.multiRemove(SAFE_TO_CLEAR_KEYS);
-            Alert.alert('Done', 'Local cache cleared.');
+            Alert.alert('Cache cleared', 'Local cache has been cleared.');
             runCheck();
           },
         },
@@ -78,7 +86,7 @@ export default function AppDiagnosticsScreen({ navigation }) {
       <ProfileHeader navigation={navigation} title="App Diagnostics" />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.intro}>
-          Check connectivity, app build, and storage health. Useful if rides aren't loading or live updates feel slow.
+          Runs live Supabase + RLS checks using your device ID. If anything fails after running SQL in Supabase, reload the app (press r in Metro).
         </Text>
 
         <Text style={styles.sectionLabel}>CONNECTION</Text>
@@ -92,19 +100,50 @@ export default function AppDiagnosticsScreen({ navigation }) {
               <Text style={styles.rowSub}>
                 {checking
                   ? 'Checking…'
-                  : supabaseOk == null
+                  : allOk == null
                     ? 'Not yet tested'
-                    : supabaseOk
-                      ? `Connected · ${latencyMs ?? '—'} ms`
-                      : 'Unreachable — check internet'}
+                    : allOk
+                      ? `All checks passed · ${latencyMs ?? '—'} ms`
+                      : `${checks.filter((c) => !c.ok).length} check(s) failed · ${latencyMs ?? '—'} ms`}
               </Text>
             </View>
-            {supabaseOk != null ? <StatusDot ok={supabaseOk} /> : null}
+            {allOk != null ? <StatusDot ok={allOk} /> : null}
           </View>
+          {deviceId ? (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.row}>
+                <View style={styles.iconWrap}>
+                  <Ionicons name="finger-print-outline" size={18} color={Theme.colors.textSub} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowLabel}>Device ID (RLS)</Text>
+                  <Text style={styles.mono} selectable>{deviceId}</Text>
+                </View>
+              </View>
+            </>
+          ) : null}
+          {checks.length > 0 ? (
+            <>
+              <View style={styles.divider} />
+              {checks.map((c) => {
+                const isWarn = c.ok && /missing — run/i.test(c.detail ?? '');
+                return (
+                  <View key={c.name} style={styles.checkRow}>
+                    <StatusDot ok={c.ok} warn={isWarn} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.checkLabel}>{c.name}</Text>
+                      <Text style={styles.checkDetail}>{c.detail}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </>
+          ) : null}
           <View style={styles.divider} />
           <Pressable onPress={runCheck} disabled={checking} style={({ pressed }) => [styles.actionRow, pressed && { opacity: 0.7 }]}>
             <Ionicons name="refresh-outline" size={16} color={Theme.colors.passenger} />
-            <Text style={styles.actionText}>{checking ? 'Running test…' : 'Run connection test'}</Text>
+            <Text style={styles.actionText}>{checking ? 'Running tests…' : 'Run full diagnostic'}</Text>
           </Pressable>
         </View>
 
@@ -154,7 +193,7 @@ export default function AppDiagnosticsScreen({ navigation }) {
         <View style={styles.tipCard}>
           <Ionicons name="bulb-outline" size={16} color={Theme.colors.gold} />
           <Text style={styles.tipText}>
-            Tip: If queue or live updates are slow, run the connection test, then close and reopen the app.
+            If reserve / Depart Now fails with permission denied, run supabase/FIX_baseline_rls_policies.sql in Supabase SQL Editor, then Settings → API → Reload schema.
           </Text>
         </View>
       </ScrollView>
@@ -182,7 +221,11 @@ const styles = StyleSheet.create({
   },
   rowLabel: { color: Theme.colors.text, fontSize: 14, fontWeight: '600' },
   rowSub: { color: Theme.colors.textMuted, fontSize: 12, marginTop: 2 },
+  mono: { color: Theme.colors.textMuted, fontSize: 10, marginTop: 4, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   dot: { width: 8, height: 8, borderRadius: 4 },
+  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  checkLabel: { color: Theme.colors.text, fontSize: 13, fontWeight: '600' },
+  checkDetail: { color: Theme.colors.textMuted, fontSize: 11, marginTop: 2, lineHeight: 16 },
   divider: { height: 1, backgroundColor: Theme.colors.border, marginLeft: 60 },
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14 },
   actionText: { color: Theme.colors.passenger, fontSize: 14, fontWeight: '700' },

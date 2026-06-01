@@ -59,8 +59,8 @@ export default function AdminDashboardScreen({ navigation }) {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Theme.colors.passenger} />}>
         <Text style={styles.intro}>
-          Lightweight ops view — sign in as an app admin (mate account) after running FIX_security_hardening.sql.
-          {stats?.unauthorized ? ' Admin access denied for this account.' : ''}
+          Operations overview for authorized administrators. Sign in with an admin mate account to view live stats.
+          {stats?.unauthorized ? ' Access denied for this account.' : ''}
         </Text>
 
         <View style={styles.statsRow}>

@@ -1,7 +1,11 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { Component } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Theme } from '@/constants/theme';
+import PremiumBackground from '@/components/PremiumBackground';
+import TrotroLogo from '@/components/TrotroLogo';
+import { Theme, glowShadow } from '@/constants/theme';
 import { recordError } from '@/services/monitoring';
 
 export default class ErrorBoundary extends Component {
@@ -19,17 +23,29 @@ export default class ErrorBoundary extends Component {
   render() {
     if (this.state.error) {
       return (
-        <View style={styles.wrap}>
-          <Text style={styles.title}>TrotroOS hit a snag</Text>
-          <Text style={styles.message}>
-            {this.state.error?.message ?? 'Something went wrong on startup.'}
-          </Text>
-          <Pressable
-            onPress={() => this.setState({ error: null })}
-            style={styles.btn}>
-            <Text style={styles.btnText}>Try again</Text>
-          </Pressable>
-        </View>
+        <PremiumBackground>
+          <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+            <View style={styles.wrap}>
+              <TrotroLogo size="md" />
+              <Text style={styles.badge}>SERVICE RECOVERY</Text>
+              <Text style={styles.title}>Something went wrong</Text>
+              <Text style={styles.message}>
+                The app encountered an unexpected error. Your account data is safe. Please try again.
+              </Text>
+              <Pressable
+                onPress={() => this.setState({ error: null })}
+                style={({ pressed }) => [styles.btn, pressed && { opacity: 0.9 }]}>
+                <LinearGradient
+                  colors={Theme.gradients.buttonMate}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.btnGradient}>
+                  <Text style={styles.btnText}>Try again</Text>
+                </LinearGradient>
+              </Pressable>
+            </View>
+          </SafeAreaView>
+        </PremiumBackground>
       );
     }
     return this.props.children;
@@ -37,21 +53,44 @@ export default class ErrorBoundary extends Component {
 }
 
 const styles = StyleSheet.create({
+  safe: { flex: 1 },
   wrap: {
     flex: 1,
-    backgroundColor: Theme.colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: 28,
   },
-  title: { color: Theme.colors.text, fontSize: 20, fontWeight: '800', marginBottom: 8 },
-  message: { color: Theme.colors.textSub, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  badge: {
+    marginTop: 20,
+    color: Theme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+  },
+  title: {
+    color: Theme.colors.text,
+    fontSize: 26,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+    marginTop: 10,
+  },
+  message: {
+    color: Theme.colors.textSub,
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginTop: 10,
+    maxWidth: 320,
+  },
   btn: {
-    marginTop: 24,
-    backgroundColor: Theme.colors.mate,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
+    marginTop: 28,
+    borderRadius: Theme.radius.lg,
+    overflow: 'hidden',
+    ...glowShadow(Theme.colors.mate, 0.25),
   },
-  btnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
+  btnGradient: {
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+  },
+  btnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
 });

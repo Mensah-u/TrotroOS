@@ -13,33 +13,50 @@ import {
 import { subscribeToAuthUrls } from '@/services/authDeepLink';
 import { getMateSession, signOutMate, supabase } from '@/services/supabase';
 
+const BOOTSTRAP_MAX_MS = 4000;
+
+async function runBootstrap() {
+  let savedRole = await getAppRole();
+  if (Platform.OS === 'web' && savedRole === ROLES.MATE) {
+    await setAppRole(ROLES.PASSENGER);
+    savedRole = ROLES.PASSENGER;
+  }
+  if (!savedRole) {
+    return { role: null, phase: 'welcome' };
+  }
+
+  if (savedRole === ROLES.MATE) {
+    const { data } = await getMateSession();
+    return {
+      role: ROLES.MATE,
+      phase: data?.session?.user ? 'app' : 'auth',
+    };
+  }
+
+  const onboarded = await isPassengerOnboarded();
+  return {
+    role: savedRole,
+    phase: onboarded ? 'app' : 'auth',
+  };
+}
+
 export function useAppSessionState() {
   const [phase, setPhase] = useState('loading');
   const [role, setRole] = useState(null);
 
   const bootstrap = useCallback(async () => {
     try {
-      let savedRole = await getAppRole();
-      if (Platform.OS === 'web' && savedRole === ROLES.MATE) {
-        await setAppRole(ROLES.PASSENGER);
-        savedRole = ROLES.PASSENGER;
+      const result = await Promise.race([
+        runBootstrap(),
+        new Promise((resolve) => {
+          setTimeout(() => resolve({ role: null, phase: 'welcome', timedOut: true }), BOOTSTRAP_MAX_MS);
+        }),
+      ]);
+      setRole(result.role);
+      setPhase(result.phase);
+      if (result.timedOut) {
+        console.warn('[TrotroOS] Session bootstrap timed out — showing welcome screen.');
       }
-      if (!savedRole) {
-        setRole(null);
-        setPhase('welcome');
-        return;
-      }
-
-      setRole(savedRole);
-
-      if (savedRole === ROLES.MATE) {
-        const { data } = await getMateSession();
-        setPhase(data?.session?.user ? 'app' : 'auth');
-        return;
-      }
-
-      const onboarded = await isPassengerOnboarded();
-      setPhase(onboarded ? 'app' : 'auth');
     } catch (err) {
       console.warn('[TrotroOS] Session bootstrap failed:', err?.message ?? err);
       setRole(null);
@@ -56,7 +73,7 @@ export function useAppSessionState() {
 
     const timeout = setTimeout(() => {
       setPhase((current) => (current === 'loading' ? 'welcome' : current));
-    }, 4000);
+    }, BOOTSTRAP_MAX_MS + 500);
 
     const advanceMateIfSignedIn = async () => {
       const savedRole = await getAppRole();

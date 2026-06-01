@@ -29,8 +29,8 @@ export default function MateVerificationScreen({ navigation }) {
     const next = !state[step.id];
     if (next) {
       Alert.alert(
-        `Mark ${step.label.toLowerCase()} as submitted?`,
-        'Your documents will be sent for review. Verified mates get a badge on Find Ride.',
+        `Mark ${step.label} as submitted?`,
+        'We will review your documents. Verified mates receive a trust badge on Find Ride.',
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -114,7 +114,7 @@ export default function MateVerificationScreen({ navigation }) {
         <View style={styles.tipCard}>
           <Ionicons name="lock-closed-outline" size={16} color={Theme.colors.textSub} />
           <Text style={styles.tipText}>
-            Verification builds passenger trust and unlocks priority placement in route searches. Document upload coming soon.
+            Verification builds passenger trust and may improve visibility on Find Ride. Document upload will be available in a future update.
           </Text>
         </View>
       </ScrollView>

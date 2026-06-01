@@ -17,6 +17,7 @@ import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { Theme } from '@/constants/theme';
 import { useI18n } from '@/context/I18nContext';
 import { submitSafetyReport } from '@/services/featuresV14';
+import { formatUserError } from '@/utils/supabaseErrors';
 import { getOrCreateDeviceId } from '@/services/passengerProfile';
 import { getCurrentMate } from '@/services/supabase';
 import { getEmergencyContact } from '@/services/emergencyContact';
@@ -69,10 +70,10 @@ export default function SafetyReportScreen({ navigation, route }) {
         description: description.trim(),
       });
       if (error) throw error;
-      Alert.alert('Report submitted', 'Our team will review this. For emergencies, call 112.');
+      Alert.alert('Report submitted', 'Thank you. Our team will review your report. For emergencies, call 112 or 191.');
       navigation.goBack();
     } catch (e) {
-      Alert.alert('Could not submit', e.message ?? 'Run supabase/FIX_v14_features.sql first.');
+      Alert.alert('Unable to submit report', formatUserError(e, 'We could not submit your report. Please try again.'));
     } finally {
       setSubmitting(false);
     }

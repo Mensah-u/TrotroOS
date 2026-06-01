@@ -46,9 +46,9 @@ export default function WelcomeScreen({ onSelectRole }) {
             </View>
 
             <Text style={styles.problemLine}>{WELCOME.problemLine}</Text>
-            <Text style={styles.heading}>How can we help?</Text>
+            <Text style={styles.heading}>How would you like to continue?</Text>
             <Text style={styles.subheading}>
-              Pick the job you need done right now.
+              Choose passenger to find a ride, or mate to publish a live trip.
             </Text>
 
             <View style={styles.cards}>

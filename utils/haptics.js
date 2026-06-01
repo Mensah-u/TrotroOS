@@ -1,22 +1,36 @@
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
 
+import { getAppPreferences } from '@/services/appPreferences';
+
+let hapticsEnabled = true;
+
+getAppPreferences()
+  .then((p) => { hapticsEnabled = p.haptics !== false; })
+  .catch(() => {});
+
+export async function refreshHapticsPreference() {
+  const p = await getAppPreferences();
+  hapticsEnabled = p.haptics !== false;
+}
+
+function run(fn) {
+  if (Platform.OS === 'web' || !hapticsEnabled) return;
+  fn().catch(() => {});
+}
+
 export function hapticLight() {
-  if (Platform.OS === 'web') return;
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  run(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
 }
 
 export function hapticMedium() {
-  if (Platform.OS === 'web') return;
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+  run(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
 }
 
 export function hapticSuccess() {
-  if (Platform.OS === 'web') return;
-  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  run(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
 }
 
 export function hapticSelect() {
-  if (Platform.OS === 'web') return;
-  Haptics.selectionAsync().catch(() => {});
+  run(() => Haptics.selectionAsync());
 }
