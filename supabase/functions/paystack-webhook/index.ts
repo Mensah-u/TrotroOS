@@ -163,20 +163,24 @@ serve(async (req) => {
     }
 
     const amountGhs = (txn.amount_in_pesewas / 100).toFixed(2);
-    const { error: ledgerError } = await supabase.from('wallet_ledger').insert({
-      user_id: txn.user_id,
-      kind: 'spend',
-      amount_ghs: amountGhs,
-      reference,
-      note: 'Paystack MoMo seat booking',
-    });
-
-    if (ledgerError) {
-      console.error('[paystack-webhook] wallet_ledger insert failed (non-fatal):', ledgerError.message);
-    }
 
     // Push notification: payment confirmed
     const paymentKind = (mergedMetadata as Record<string, unknown>)?.payment_kind ?? 'passenger_booking';
+
+    // Mate invite fees are costs to the mate, not wallet deposits — skip the
+    // passenger wallet_ledger entry; only record ledger for passenger bookings.
+    if (paymentKind !== 'mate_invite') {
+      const { error: ledgerError } = await supabase.from('wallet_ledger').insert({
+        user_id: txn.user_id,
+        kind: 'spend',
+        amount_ghs: amountGhs,
+        reference,
+        note: 'Paystack MoMo seat booking',
+      });
+      if (ledgerError) {
+        console.error('[paystack-webhook] wallet_ledger insert failed (non-fatal):', ledgerError.message);
+      }
+    }
     if (paymentKind === 'mate_invite') {
       // Notify the mate their invite payment went through
       pushToUser(supabase, txn.user_id, {

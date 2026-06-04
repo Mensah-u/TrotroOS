@@ -26,7 +26,7 @@ if (useNotificationsStub) {
   };
 }
 
-config.cacheVersion = 'trotro-v1.4.0-dev';
+config.cacheVersion = 'trotro-v1.5.0-dev';
 
 // Sentry Metro wrapper slows local bundling; use only for EAS/release builds.
 module.exports =

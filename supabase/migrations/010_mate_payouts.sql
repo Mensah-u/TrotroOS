@@ -59,11 +59,12 @@ security definer
 set search_path = public
 as $$
 declare
-  uid uuid := auth.uid();
+  uid          uuid := auth.uid();
   pending_count integer;
-  min_payout numeric := 5.00;
-  max_payout numeric := 5000.00;
-  network text := upper(trim(p_network));
+  new_id       uuid;
+  min_payout   numeric := 5.00;
+  max_payout   numeric := 5000.00;
+  network      text    := upper(trim(p_network));
 begin
   if uid is null then
     return jsonb_build_object('ok', false, 'error', 'Not signed in');
@@ -83,18 +84,19 @@ begin
   if network not in ('MTN', 'VODAFONE', 'AIRTELTIGO') then
     network := 'MTN';
   end if;
-  if network = 'VODAFONE' then network := 'Vodafone'; end if;
+  if network = 'VODAFONE'   then network := 'Vodafone';   end if;
   if network = 'AIRTELTIGO' then network := 'AirtelTigo'; end if;
 
+  -- Block if a request is already in-flight (pending or being processed)
   select count(*) into pending_count
   from public.mate_payout_requests
   where mate_id = uid
-    and status = 'pending';
+    and status in ('pending', 'processing');
 
   if pending_count > 0 then
     return jsonb_build_object(
       'ok', false,
-      'error', 'You already have a pending payout request. Wait for it to be processed.'
+      'error', 'You already have a payout request in progress. Wait for it to complete.'
     );
   end if;
 
@@ -107,9 +109,14 @@ begin
     trim(p_momo_number),
     network,
     'pending'
-  );
+  )
+  returning id into new_id;
 
-  return jsonb_build_object('ok', true, 'message', 'Payout request submitted. Processed within 1–2 business days.');
+  return jsonb_build_object(
+    'ok', true,
+    'payout_id', new_id,
+    'message', 'Payout request submitted. Processing now…'
+  );
 exception
   when others then
     return jsonb_build_object('ok', false, 'error', sqlerrm);

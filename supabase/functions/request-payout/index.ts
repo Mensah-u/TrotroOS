@@ -2,16 +2,22 @@
  * request-payout — validate payout request, create Paystack transfer recipient,
  * initiate Paystack Transfer, and update payout status.
  *
- * POST body: { payoutId } — called by admin / cron after approving a pending request.
- * Requires service role (no public access).
+ * POST body: { payoutId }
+ *
+ * Callers:
+ *   • Service role (admin / cron): unrestricted.
+ *   • Authenticated mate (their own payout): ownership is verified before processing.
  */
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 
 import {
   corsHeaders,
   errorResponse,
+  getBearerToken,
   getPaystackSecretKey,
   getServiceClient,
+  getUserClient,
+  isServiceRoleKey,
   jsonResponse,
 } from '../_shared/supabaseAdmin.ts';
 import { pushToUser } from '../_shared/expoPush.ts';
@@ -68,6 +74,19 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
 
+  // ── Authorization ────────────────────────────────────────────────────────
+  const jwt = getBearerToken(req);
+  if (!jwt) return errorResponse('Authorization header required', 401);
+
+  let callerUid: string | null = null;
+  if (!isServiceRoleKey(jwt)) {
+    const userClient = getUserClient(jwt);
+    const { data: { user }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !user) return errorResponse('Authenticated user required', 401);
+    callerUid = user.id; // will verify ownership below
+  }
+  // ── End Authorization ─────────────────────────────────────────────────────
+
   let body: { payoutId?: string };
   try {
     body = await req.json();
@@ -88,6 +107,12 @@ serve(async (req) => {
 
   if (fetchErr) return errorResponse(fetchErr.message, 500);
   if (!payout) return errorResponse('Payout request not found', 404);
+
+  // If called by a mate (not service role), verify they own this request
+  if (callerUid && payout.mate_id !== callerUid) {
+    return errorResponse('Forbidden', 403);
+  }
+
   if (payout.status !== 'pending') {
     return jsonResponse({ ok: true, skipped: true, status: payout.status });
   }

@@ -1,7 +1,12 @@
 /**
- * send-push — internal Edge Function to deliver a push notification to any user.
- * Called server-to-server; requires service role key in Authorization header
- * (or from other Edge Functions via supabase.functions.invoke with service context).
+ * send-push — deliver a push notification to any user.
+ *
+ * Callers must be authenticated:
+ *   • Service-role callers (admin / cron / other edge functions): pass the
+ *     service-role key as the Bearer token — unrestricted.
+ *   • Regular authenticated users (e.g. mates sending invite notifications):
+ *     pass their JWT — allowed.
+ *   • Anon / missing token: rejected 401.
  *
  * POST body: { recipientId, title, body, data? }
  */
@@ -11,13 +16,30 @@ import { pushToUser } from '../_shared/expoPush.ts';
 import {
   corsHeaders,
   errorResponse,
+  getBearerToken,
   getServiceClient,
+  getUserClient,
+  isServiceRoleKey,
   jsonResponse,
 } from '../_shared/supabaseAdmin.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return errorResponse('Method not allowed', 405);
+
+  // ── Authorization ──────────────────────────────────────────────────────────
+  const jwt = getBearerToken(req);
+  if (!jwt) return errorResponse('Authorization header required', 401);
+
+  if (!isServiceRoleKey(jwt)) {
+    // Verify the token is a real authenticated user (not anon key)
+    const userClient = getUserClient(jwt);
+    const { data: { user }, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !user) {
+      return errorResponse('Authenticated user required', 401);
+    }
+  }
+  // ── End Authorization ───────────────────────────────────────────────────────
 
   let body: { recipientId?: string; title?: string; body?: string; data?: Record<string, unknown> };
   try {

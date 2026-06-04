@@ -1,6 +1,6 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- TrotroOS · COMPLETE DATABASE SETUP (auto-generated)
--- Generated: 2026-06-04T06:49:25.552Z
+-- Generated: 2026-06-04T07:38:38.241Z
 --
 -- Paste this ENTIRE file into Supabase SQL Editor → Run once
 -- https://supabase.com/dashboard/project/siwzjxwholmoassrdtwx/sql/new
@@ -16,14 +16,15 @@
 --   5. FIX_mate_reservations.sql
 --   6. FIX_nearby_indexes.sql
 --   7. FIX_payments_and_wallet.sql
---   8. migrations/007_payment_transactions.sql
---   9. migrations/008_payment_reservation_link.sql
---   10. migrations/009_mate_invite_payments.sql
---   11. migrations/010_mate_payouts.sql
---   12. FIX_reservations_passenger_id_alter.sql
---   13. FIX_baseline_rls_policies.sql
---   14. FIX_security_hardening.sql
---   15. FIX_missing_ride_request_rpc.sql
+--   8. migrations/005_trips_rls_fix.sql
+--   9. migrations/007_payment_transactions.sql
+--   10. migrations/008_payment_reservation_link.sql
+--   11. migrations/009_mate_invite_payments.sql
+--   12. migrations/010_mate_payouts.sql
+--   13. FIX_reservations_passenger_id_alter.sql
+--   14. FIX_baseline_rls_policies.sql
+--   15. FIX_security_hardening.sql
+--   16. FIX_missing_ride_request_rpc.sql
 --
 -- Safe to re-run on an existing project (uses IF NOT EXISTS / DROP POLICY IF EXISTS).
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -1349,6 +1350,102 @@ notify pgrst, 'reload schema';
 
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- BEGIN: migrations/005_trips_rls_fix.sql
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+-- ============================================================================
+-- TrotroOS · Fix trips + mate_profiles RLS (mate "Depart Now" insert blocked)
+-- Run this in Supabase → SQL Editor
+-- ============================================================================
+
+-- ─── mate_profiles (if table missing) ───────────────────────────────────────
+create table if not exists public.mate_profiles (
+  id                   uuid primary key references auth.users(id) on delete cascade,
+  full_name            text not null,
+  phone_number         text not null,
+  vehicle_registration text not null,
+  vehicle_type         text not null,
+  default_route        text,
+  created_at           timestamptz not null default now()
+);
+
+alter table public.mate_profiles enable row level security;
+
+drop policy if exists "Mate can read own profile"   on public.mate_profiles;
+drop policy if exists "Mate can insert own profile"   on public.mate_profiles;
+drop policy if exists "Mate can update own profile"   on public.mate_profiles;
+drop policy if exists "Passengers can read mate profiles" on public.mate_profiles;
+
+create policy "Mate can read own profile"
+  on public.mate_profiles for select to authenticated
+  using (auth.uid() = id);
+
+create policy "Mate can insert own profile"
+  on public.mate_profiles for insert to authenticated
+  with check (auth.uid() = id);
+
+create policy "Mate can update own profile"
+  on public.mate_profiles for update to authenticated
+  using (auth.uid() = id)
+  with check (auth.uid() = id);
+
+-- Passengers need mate name/plate on trip cards
+create policy "Passengers can read mate profiles"
+  on public.mate_profiles for select to anon, authenticated
+  using (true);
+
+
+-- ─── trips ───────────────────────────────────────────────────────────────────
+create table if not exists public.trips (
+  id               uuid primary key default gen_random_uuid(),
+  mate_id          uuid not null references auth.users(id) on delete cascade,
+  route            text not null,
+  origin           text not null,
+  destination      text not null,
+  total_seats      integer not null check (total_seats > 0),
+  available_seats  integer not null check (available_seats >= 0),
+  status           text not null default 'active',
+  created_at       timestamptz not null default now()
+);
+
+alter table public.trips enable row level security;
+
+-- Drop old/conflicting policies
+drop policy if exists "Mates manage own trips"        on public.trips;
+drop policy if exists "Anyone can read active trips"  on public.trips;
+drop policy if exists "Mates can insert own trips"  on public.trips;
+drop policy if exists "Mates can update own trips"  on public.trips;
+drop policy if exists "Mates can delete own trips"  on public.trips;
+drop policy if exists "Public can read active trips"  on public.trips;
+
+-- Mate: create a trip (Depart Now)
+create policy "Mates can insert own trips"
+  on public.trips for insert to authenticated
+  with check (auth.uid() = mate_id);
+
+-- Mate: update seats / end trip
+create policy "Mates can update own trips"
+  on public.trips for update to authenticated
+  using (auth.uid() = mate_id)
+  with check (auth.uid() = mate_id);
+
+-- Mate: optional delete
+create policy "Mates can delete own trips"
+  on public.trips for delete to authenticated
+  using (auth.uid() = mate_id);
+
+-- Mate: read own trip history
+create policy "Mates can read own trips"
+  on public.trips for select to authenticated
+  using (auth.uid() = mate_id);
+
+-- Passengers (anonymous): read live trips on Find Ride screen
+create policy "Public can read active trips"
+  on public.trips for select to anon, authenticated
+  using (status in ('active', 'full'));
+
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- BEGIN: migrations/007_payment_transactions.sql
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1809,11 +1906,12 @@ security definer
 set search_path = public
 as $$
 declare
-  uid uuid := auth.uid();
+  uid          uuid := auth.uid();
   pending_count integer;
-  min_payout numeric := 5.00;
-  max_payout numeric := 5000.00;
-  network text := upper(trim(p_network));
+  new_id       uuid;
+  min_payout   numeric := 5.00;
+  max_payout   numeric := 5000.00;
+  network      text    := upper(trim(p_network));
 begin
   if uid is null then
     return jsonb_build_object('ok', false, 'error', 'Not signed in');
@@ -1833,18 +1931,19 @@ begin
   if network not in ('MTN', 'VODAFONE', 'AIRTELTIGO') then
     network := 'MTN';
   end if;
-  if network = 'VODAFONE' then network := 'Vodafone'; end if;
+  if network = 'VODAFONE'   then network := 'Vodafone';   end if;
   if network = 'AIRTELTIGO' then network := 'AirtelTigo'; end if;
 
+  -- Block if a request is already in-flight (pending or being processed)
   select count(*) into pending_count
   from public.mate_payout_requests
   where mate_id = uid
-    and status = 'pending';
+    and status in ('pending', 'processing');
 
   if pending_count > 0 then
     return jsonb_build_object(
       'ok', false,
-      'error', 'You already have a pending payout request. Wait for it to be processed.'
+      'error', 'You already have a payout request in progress. Wait for it to complete.'
     );
   end if;
 
@@ -1857,9 +1956,14 @@ begin
     trim(p_momo_number),
     network,
     'pending'
-  );
+  )
+  returning id into new_id;
 
-  return jsonb_build_object('ok', true, 'message', 'Payout request submitted. Processed within 1–2 business days.');
+  return jsonb_build_object(
+    'ok', true,
+    'payout_id', new_id,
+    'message', 'Payout request submitted. Processing now…'
+  );
 exception
   when others then
     return jsonb_build_object('ok', false, 'error', sqlerrm);

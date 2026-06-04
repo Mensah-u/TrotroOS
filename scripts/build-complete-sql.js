@@ -19,6 +19,7 @@ const FILES = [
   'FIX_mate_reservations.sql',
   'FIX_nearby_indexes.sql',
   'FIX_payments_and_wallet.sql',
+  'migrations/005_trips_rls_fix.sql',
   'migrations/007_payment_transactions.sql',
   'migrations/008_payment_reservation_link.sql',
   'migrations/009_mate_invite_payments.sql',
