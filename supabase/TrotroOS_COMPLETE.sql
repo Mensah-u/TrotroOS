@@ -1,6 +1,6 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- TrotroOS · COMPLETE DATABASE SETUP (auto-generated)
--- Generated: 2026-06-04T07:38:38.241Z
+-- Generated: 2026-06-04T07:51:19.823Z
 --
 -- Paste this ENTIRE file into Supabase SQL Editor → Run once
 -- https://supabase.com/dashboard/project/siwzjxwholmoassrdtwx/sql/new
@@ -1413,9 +1413,10 @@ alter table public.trips enable row level security;
 -- Drop old/conflicting policies
 drop policy if exists "Mates manage own trips"        on public.trips;
 drop policy if exists "Anyone can read active trips"  on public.trips;
-drop policy if exists "Mates can insert own trips"  on public.trips;
-drop policy if exists "Mates can update own trips"  on public.trips;
-drop policy if exists "Mates can delete own trips"  on public.trips;
+drop policy if exists "Mates can insert own trips"    on public.trips;
+drop policy if exists "Mates can update own trips"    on public.trips;
+drop policy if exists "Mates can delete own trips"    on public.trips;
+drop policy if exists "Mates can read own trips"      on public.trips;
 drop policy if exists "Public can read active trips"  on public.trips;
 
 -- Mate: create a trip (Depart Now)
