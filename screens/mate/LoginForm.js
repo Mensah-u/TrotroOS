@@ -15,21 +15,9 @@ import { FormInput } from '@/components/FormInput';
 import PremiumBackground from '@/components/PremiumBackground';
 import TrotroLogo from '@/components/TrotroLogo';
 import { SCREEN_SCROLL_BOTTOM } from '@/constants/layout';
-import { Theme } from '@/constants/theme';
+import { C, Theme } from '@/constants/theme';
 import { signInMate } from '@/services/supabase';
 import { isEmailNotConfirmedError } from '@/services/authDeepLink';
-
-const C = {
-  BG:         '#0C0C0C',
-  SURFACE:    '#161616',
-  SURFACE_UP: '#1E1E1E',
-  BORDER:     'rgba(255,255,255,0.07)',
-  ACCENT:     Theme.colors.mate,
-  TEXT:       '#F9FAFB',
-  TEXT_SUB:   '#9CA3AF',
-  TEXT_MUTED: '#4B5563',
-  DANGER:     '#EF4444',
-};
 
 export default function LoginForm({ onSuccess, onSwitchToSignUp, onBack }) {
   const [email,      setEmail]      = useState('');
@@ -161,7 +149,7 @@ const styles = StyleSheet.create({
   backText:  { color: C.TEXT_SUB, fontSize: 15, fontWeight: '600' },
 
   logoRow:  { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 36 },
-  logoIcon: { width: 46, height: 46, borderRadius: 14, backgroundColor: 'rgba(249,115,22,0.12)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(249,115,22,0.3)' },
+  logoIcon: { width: 46, height: 46, borderRadius: 14, backgroundColor: 'rgba(243,111,33,0.12)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(243,111,33,0.3)' },
   logoText: { color: C.TEXT, fontSize: 22, fontWeight: '800', letterSpacing: -0.4 },
 
   heading:    { color: C.TEXT, fontSize: 30, fontWeight: '800', letterSpacing: -0.5, marginBottom: 8 },

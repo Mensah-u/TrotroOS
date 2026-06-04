@@ -46,9 +46,9 @@ export default function WelcomeScreen({ onSelectRole }) {
             </View>
 
             <Text style={styles.problemLine}>{WELCOME.problemLine}</Text>
-            <Text style={styles.heading}>How can we help?</Text>
+            <Text style={styles.heading}>How would you like to continue?</Text>
             <Text style={styles.subheading}>
-              Pick the job you need done right now.
+              Choose passenger to find a ride, or mate to publish a live trip.
             </Text>
 
             <View style={styles.cards}>
@@ -56,7 +56,7 @@ export default function WelcomeScreen({ onSelectRole }) {
                 title={WELCOME.passengerTitle}
                 subtitle={WELCOME.passengerSubtitle}
                 icon="person"
-                iconColor={Theme.colors.passenger}
+                iconColor={Theme.colors.passengerMap}
                 gradientColors={Theme.gradients.passengerCard}
                 badge="RIDE"
                 features={['Live map on your route', 'One-tap reserve', 'Track your trotro']}
@@ -66,7 +66,7 @@ export default function WelcomeScreen({ onSelectRole }) {
                 title={WELCOME.mateTitle}
                 subtitle={WELCOME.mateSubtitle}
                 icon="bus"
-                iconColor={Theme.colors.mate}
+                iconColor={Theme.colors.mateMap}
                 gradientColors={Theme.gradients.mateCard}
                 badge="DRIVE"
                 features={['Start route once', 'See waiting passengers', 'Track earnings']}
@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
   statValue: { color: Theme.colors.text, fontSize: 16, fontWeight: '900' },
   statLabel: { color: Theme.colors.textMuted, fontSize: 10, fontWeight: '700', marginTop: 3, textAlign: 'center' },
   problemLine: {
-    color: Theme.colors.passenger,
+    color: Theme.colors.passengerMap,
     fontSize: 15,
     fontWeight: '700',
     lineHeight: 22,

@@ -15,10 +15,9 @@ export default function MateAuthScreen({ onSuccess, onBack }) {
 
   const setupBanner = !backendReady ? (
     <View style={styles.setupBanner}>
-      <Text style={styles.setupTitle}>Database setup required</Text>
+      <Text style={styles.setupTitle}>Service configuration required</Text>
       <Text style={styles.setupText}>
-        Open Supabase → SQL Editor, paste and run the file{' '}
-        <Text style={styles.setupCode}>supabase/RUN_THIS_FIRST.sql</Text>, then try again.
+        Mate sign-in is unavailable until the backend is configured. Open Profile → App Diagnostics to check connectivity, or contact support.
       </Text>
     </View>
   ) : null;

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import ProfileHeader from '@/components/ProfileHeader';
@@ -39,6 +39,12 @@ export default function SafetyScreen({ navigation }) {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ProfileHeader navigation={navigation} title="Safety" />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Pressable
+          onPress={() => navigation.navigate('SafetyReport')}
+          style={({ pressed }) => [styles.reportBtn, pressed && { opacity: 0.9 }]}>
+          <Ionicons name="flag-outline" size={18} color="#fff" />
+          <Text style={styles.reportBtnText}>Report an issue or dispute</Text>
+        </Pressable>
         <View style={styles.banner}>
           <Ionicons name="shield-checkmark" size={28} color={Theme.colors.success} />
           <Text style={styles.bannerTitle}>Travel safely with TrotroOS</Text>
@@ -65,6 +71,17 @@ export default function SafetyScreen({ navigation }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Theme.colors.bgElevated },
   content: { padding: 20, paddingBottom: TAB_BAR_CLEARANCE },
+  reportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Theme.colors.danger,
+    borderRadius: 12,
+    paddingVertical: 14,
+    marginBottom: 16,
+  },
+  reportBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   banner: {
     backgroundColor: Theme.colors.successSoft,
     borderRadius: Theme.radius.lg,

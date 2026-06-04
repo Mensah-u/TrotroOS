@@ -40,6 +40,11 @@ export const GOOGLE_MAPS_ANDROID_KEY = pick(
   'GOOGLE_MAPS_ANDROID_KEY',
 );
 
+/** Maps JavaScript API — restrict by HTTP referrer (your web domain). Falls back to Android key for local dev. */
+export const GOOGLE_MAPS_WEB_KEY =
+  pick('EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY', 'googleMapsWebKey', 'GOOGLE_MAPS_WEB_KEY')
+  || GOOGLE_MAPS_ANDROID_KEY;
+
 export const ETA_SERVICE_URL = pick('EXPO_PUBLIC_ETA_SERVICE_URL', 'etaServiceUrl', 'ETA_SERVICE_URL');
 
 export const API_BASE_URL = pick('EXPO_PUBLIC_API_BASE_URL', 'apiBaseUrl', 'API_BASE_URL');
@@ -47,6 +52,16 @@ export const API_BASE_URL = pick('EXPO_PUBLIC_API_BASE_URL', 'apiBaseUrl', 'API_
 export const API_KEY = pick('EXPO_PUBLIC_API_KEY', 'apiKey', 'API_KEY');
 
 export const SENTRY_DSN = pick('EXPO_PUBLIC_SENTRY_DSN', 'sentryDsn', 'SENTRY_DSN');
+
+/** Set EXPO_PUBLIC_PAYMENTS_ENABLED=false to skip Paystack during local dev. */
+export const PAYMENTS_ENABLED =
+  pick('EXPO_PUBLIC_PAYMENTS_ENABLED', 'paymentsEnabled', 'PAYMENTS_ENABLED').toLowerCase() !== 'false';
+
+export const PRIVACY_POLICY_URL = pick(
+  'EXPO_PUBLIC_PRIVACY_POLICY_URL',
+  'privacyPolicyUrl',
+  'PRIVACY_POLICY_URL',
+) || 'https://trotroos.com/privacy';
 
 export function assertClientConfig() {
   const missing = [];

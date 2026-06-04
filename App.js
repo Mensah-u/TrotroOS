@@ -6,14 +6,23 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import * as Linking from 'expo-linking';
 import { useEffect } from 'react';
 import { Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import BrandedLoader from './components/BrandedLoader';
+import WebAppShell from './components/WebAppShell';
+import { I18nProvider } from './context/I18nContext';
 import { loadStaticData, refreshStaticData } from './services/staticData';
-import { recordEvent, recordError, initMonitoring } from './services/monitoring';
+import { initMonitoring, recordEvent, recordError, setUser, wrapAppWithMonitoring } from './services/monitoring';
+import { autoRegisterPush, resetPushRegistration } from './services/pushNotifications';
+import { getOrCreateDeviceId } from './services/passengerProfile';
+import { parseAppDeepLink } from './services/shareLinks';
+import { setPendingRidePrefill } from './services/deepLinkStore';
+import { flushOfflineQueue } from './services/offlineQueue';
+import { upsertPassengerLocation } from './services/supabase';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AppSessionContext, useAppSession } from './context/AppSessionContext';
 import { useAppSessionState } from './hooks/useAppSessionState';
@@ -21,12 +30,14 @@ import { TAB_BAR_CLEARANCE } from './constants/layout';
 import { Theme, glowShadow } from './constants/theme';
 import MateAuthScreen from './screens/auth/MateAuthScreen';
 import FindRideScreen from './screens/FindRideScreen';
+import PassengerRideRequestWatcher from './components/PassengerRideRequestWatcher';
 import MateScreen from './screens/MateScreen';
 import MateAccountScreen from './screens/MateAccountScreen';
 import MateProfileScreen from './screens/MateProfileScreen';
 import PassengerAuthScreen from './screens/passenger/PassengerAuthScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import TripHistoryScreen from './screens/TripHistoryScreen';
+import WebLandingScreen from './screens/web/WebLandingScreen';
 import WelcomeScreen from './screens/WelcomeScreen';
 import EarnScreen from './screens/mate/EarnScreen';
 import AboutScreen from './screens/profile/AboutScreen';
@@ -47,6 +58,9 @@ import PrivacyScreen from './screens/profile/PrivacyScreen';
 import DataPrivacyScreen from './screens/profile/DataPrivacyScreen';
 import PrivacyPolicyScreen from './screens/profile/PrivacyPolicyScreen';
 import SafetyScreen from './screens/profile/SafetyScreen';
+import SafetyReportScreen from './screens/profile/SafetyReportScreen';
+import ScheduledRideScreen from './screens/profile/ScheduledRideScreen';
+import AdminDashboardScreen from './screens/profile/AdminDashboardScreen';
 import SavedPlacesScreen from './screens/profile/SavedPlacesScreen';
 import SupportScreen from './screens/profile/SupportScreen';
 import TermsScreen from './screens/profile/TermsScreen';
@@ -69,7 +83,7 @@ function floatingTabBar(accent) {
     bottom: Platform.OS === 'ios' ? 26 : 14,
     height: 68,
     borderRadius: 22,
-    backgroundColor: 'rgba(14,14,14,0.94)',
+    backgroundColor: 'rgba(18,18,18,0.94)',
     borderTopWidth: 0,
     borderWidth: 1,
     borderColor: Theme.colors.borderStrong,
@@ -115,6 +129,9 @@ function MateAccountStack() {
       <MateStack.Screen name="DataPrivacy" component={DataPrivacyScreen} />
       <MateStack.Screen name="MateInsights" component={MateInsightsScreen} />
       <MateStack.Screen name="MateVerification" component={MateVerificationScreen} />
+      <MateStack.Screen name="ScheduledRide" component={ScheduledRideScreen} />
+      <MateStack.Screen name="SafetyReport" component={SafetyReportScreen} />
+      <MateStack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
       <MateStack.Screen name="EmergencyContact" component={EmergencyContactScreen} />
       <MateStack.Screen name="Language" component={LanguageScreen} />
       <MateStack.Screen name="InviteFriends" component={InviteFriendsScreen} />
@@ -141,6 +158,7 @@ function ProfileTabStack() {
       <ProfileStack.Screen name="DataPrivacy" component={DataPrivacyScreen} />
       <ProfileStack.Screen name="SavedPlaces" component={SavedPlacesScreen} />
       <ProfileStack.Screen name="FavoriteRoutes" component={FavoriteRoutesScreen} />
+      <ProfileStack.Screen name="ScheduledRide" component={ScheduledRideScreen} />
       <ProfileStack.Screen name="EmergencyContact" component={EmergencyContactScreen} />
       <ProfileStack.Screen name="Language" component={LanguageScreen} />
       <ProfileStack.Screen name="InviteFriends" component={InviteFriendsScreen} />
@@ -148,6 +166,8 @@ function ProfileTabStack() {
       <ProfileStack.Screen name="Support" component={SupportScreen} />
       <ProfileStack.Screen name="Feedback" component={FeedbackScreen} />
       <ProfileStack.Screen name="Safety" component={SafetyScreen} />
+      <ProfileStack.Screen name="SafetyReport" component={SafetyReportScreen} />
+      <ProfileStack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
       <ProfileStack.Screen name="Terms" component={TermsScreen} />
       <ProfileStack.Screen name="About" component={AboutScreen} />
     </ProfileStack.Navigator>
@@ -156,34 +176,37 @@ function ProfileTabStack() {
 
 function PassengerApp() {
   return (
-    <PassengerTab.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: Theme.colors.passenger,
-        tabBarInactiveTintColor: Theme.colors.textMuted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
-        tabBarStyle: floatingTabBar(Theme.colors.passenger),
-        sceneContainerStyle: { paddingBottom: TAB_BOTTOM },
-      }}>
-      <PassengerTab.Screen
-        name="Find Ride"
-        component={FindRideScreen}
-        options={{
-          tabBarIcon: ({ focused, color }) => (
-            <TabIcon focused={focused} color={color} name={focused ? 'search' : 'search-outline'} accent={Theme.colors.passenger} />
-          ),
-        }}
-      />
-      <PassengerTab.Screen
-        name="Profile"
-        component={ProfileTabStack}
-        options={{
-          tabBarIcon: ({ focused, color }) => (
-            <TabIcon focused={focused} color={color} name={focused ? 'person' : 'person-outline'} accent={Theme.colors.passenger} />
-          ),
-        }}
-      />
-    </PassengerTab.Navigator>
+    <>
+      <PassengerRideRequestWatcher />
+      <PassengerTab.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: Theme.colors.passenger,
+          tabBarInactiveTintColor: Theme.colors.textMuted,
+          tabBarLabelStyle: { fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
+          tabBarStyle: floatingTabBar(Theme.colors.passenger),
+          sceneContainerStyle: { paddingBottom: TAB_BOTTOM },
+        }}>
+        <PassengerTab.Screen
+          name="Find Ride"
+          component={FindRideScreen}
+          options={{
+            tabBarIcon: ({ focused, color }) => (
+              <TabIcon focused={focused} color={color} name={focused ? 'search' : 'search-outline'} accent={Theme.colors.passenger} />
+            ),
+          }}
+        />
+        <PassengerTab.Screen
+          name="Profile"
+          component={ProfileTabStack}
+          options={{
+            tabBarIcon: ({ focused, color }) => (
+              <TabIcon focused={focused} color={color} name={focused ? 'person' : 'person-outline'} accent={Theme.colors.passenger} />
+            ),
+          }}
+        />
+      </PassengerTab.Navigator>
+    </>
   );
 }
 
@@ -232,13 +255,48 @@ function MateApp() {
 function AppRoot() {
   const session = useAppSession();
 
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
   // Warm the offline-first static data cache (routes / places / fares).
   // Non-blocking — bundled snapshot is already available synchronously.
   useEffect(() => {
     initMonitoring();
     recordEvent('app_boot');
+    getOrCreateDeviceId().catch((e) => recordError(e, { where: 'getOrCreateDeviceId' }));
     loadStaticData().catch((e) => recordError(e, { where: 'loadStaticData' }));
-    refreshStaticData().catch((e) => recordError(e, { where: 'refreshStaticData' }));
+
+    const handleUrl = (url) => {
+      const parsed = parseAppDeepLink(url);
+      if (parsed?.type === 'ride' && (parsed.from || parsed.to)) {
+        setPendingRidePrefill({ from: parsed.from, to: parsed.to, ref: parsed.ref });
+      }
+    };
+    Linking.getInitialURL().then((url) => url && handleUrl(url)).catch(() => {});
+    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+
+    const idle = setTimeout(() => {
+      refreshStaticData().catch((e) => recordError(e, { where: 'refreshStaticData' }));
+      flushOfflineQueue({
+        passenger_location: async (payload) => {
+          const { error } = await upsertPassengerLocation(
+            payload.deviceId,
+            payload.reservationId,
+            payload.latitude,
+            payload.longitude,
+            payload.queuedRoute,
+            payload.pickupStop,
+          );
+          return !error;
+        },
+      }).catch(() => {});
+    }, 1500);
+
+    return () => {
+      clearTimeout(idle);
+      sub.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -247,11 +305,47 @@ function AppRoot() {
     }
   }, [session.phase]);
 
+  useEffect(() => {
+    if (session.phase !== 'app' || !session.role) return;
+    (async () => {
+      const deviceId = await import('./services/passengerProfile')
+        .then((m) => m.getOrCreateDeviceId())
+        .catch(() => null);
+      const userId = session.role === ROLES.MATE
+        ? (await import('./services/supabase').then((m) => m.supabase.auth.getUser()).catch(() => null))?.data?.user?.id ?? deviceId
+        : deviceId;
+      if (userId) {
+        autoRegisterPush({ userId, userRole: session.role });
+      }
+    })();
+  }, [session.phase, session.role]);
+
+  useEffect(() => {
+    if (session.phase === 'welcome') resetPushRegistration();
+  }, [session.phase]);
+
+  useEffect(() => {
+    if (session.phase === 'loading') return undefined;
+    (async () => {
+      const deviceId = await getOrCreateDeviceId().catch(() => null);
+      setUser({
+        deviceId: deviceId ?? undefined,
+        role: session.role ?? 'unknown',
+        id: deviceId ?? session.role ?? 'anonymous',
+      });
+      recordEvent('session_ready', { role: session.role, phase: session.phase });
+    })();
+    return undefined;
+  }, [session.phase, session.role]);
+
   if (session.phase === 'loading') {
     return <BrandedLoader message="Starting TrotroOS" />;
   }
 
   if (session.phase === 'welcome') {
+    if (Platform.OS === 'web') {
+      return <WebLandingScreen onBookRide={() => session.selectRole(ROLES.PASSENGER)} />;
+    }
     return <WelcomeScreen onSelectRole={session.selectRole} />;
   }
 
@@ -278,21 +372,31 @@ function AppRoot() {
   return <WelcomeScreen onSelectRole={session.selectRole} />;
 }
 
-export default function App() {
+function App() {
   const session = useAppSessionState();
+  const webMarketing =
+    Platform.OS === 'web'
+    && (session.phase === 'welcome'
+      || (session.phase === 'auth' && session.role === ROLES.MATE));
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ErrorBoundary>
-          <AppSessionContext.Provider value={session}>
-            <NavigationContainer>
-              <StatusBar style="light" />
-              <AppRoot />
-            </NavigationContainer>
-          </AppSessionContext.Provider>
-        </ErrorBoundary>
+        <WebAppShell mode={webMarketing ? 'marketing' : 'app'}>
+          <ErrorBoundary>
+            <I18nProvider>
+              <AppSessionContext.Provider value={session}>
+                <NavigationContainer>
+                  <StatusBar style="light" />
+                  <AppRoot />
+                </NavigationContainer>
+              </AppSessionContext.Provider>
+            </I18nProvider>
+          </ErrorBoundary>
+        </WebAppShell>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
+
+export default wrapAppWithMonitoring(App);

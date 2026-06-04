@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 
+import { getOrCreateDeviceId } from '@/services/passengerProfile';
 import {
   clearAppRole,
   getAppRole,
@@ -9,7 +11,35 @@ import {
   setPassengerOnboarded,
 } from '@/services/appRole';
 import { subscribeToAuthUrls } from '@/services/authDeepLink';
-import { getCurrentMate, getMateSession, signOutMate, supabase } from '@/services/supabase';
+import { clearStaleAuthSession, getMateSession, signOutMate, supabase } from '@/services/supabase';
+
+const BOOTSTRAP_MAX_MS = 4000;
+
+async function runBootstrap() {
+  await clearStaleAuthSession();
+  let savedRole = await getAppRole();
+  if (Platform.OS === 'web' && savedRole === ROLES.MATE) {
+    await setAppRole(ROLES.PASSENGER);
+    savedRole = ROLES.PASSENGER;
+  }
+  if (!savedRole) {
+    return { role: null, phase: 'welcome' };
+  }
+
+  if (savedRole === ROLES.MATE) {
+    const { data } = await getMateSession();
+    return {
+      role: ROLES.MATE,
+      phase: data?.session?.user ? 'app' : 'auth',
+    };
+  }
+
+  const onboarded = await isPassengerOnboarded();
+  return {
+    role: savedRole,
+    phase: onboarded ? 'app' : 'auth',
+  };
+}
 
 export function useAppSessionState() {
   const [phase, setPhase] = useState('loading');
@@ -17,23 +47,17 @@ export function useAppSessionState() {
 
   const bootstrap = useCallback(async () => {
     try {
-      const savedRole = await getAppRole();
-      if (!savedRole) {
-        setRole(null);
-        setPhase('welcome');
-        return;
+      const result = await Promise.race([
+        runBootstrap(),
+        new Promise((resolve) => {
+          setTimeout(() => resolve({ role: null, phase: 'welcome', timedOut: true }), BOOTSTRAP_MAX_MS);
+        }),
+      ]);
+      setRole(result.role);
+      setPhase(result.phase);
+      if (result.timedOut) {
+        console.warn('[TrotroOS] Session bootstrap timed out — showing welcome screen.');
       }
-
-      setRole(savedRole);
-
-      if (savedRole === ROLES.MATE) {
-        const { data } = await getCurrentMate();
-        setPhase(data?.user ? 'app' : 'auth');
-        return;
-      }
-
-      const onboarded = await isPassengerOnboarded();
-      setPhase(onboarded ? 'app' : 'auth');
     } catch (err) {
       console.warn('[TrotroOS] Session bootstrap failed:', err?.message ?? err);
       setRole(null);
@@ -42,11 +66,15 @@ export function useAppSessionState() {
   }, []);
 
   useEffect(() => {
+    getOrCreateDeviceId().catch(() => {});
+  }, []);
+
+  useEffect(() => {
     bootstrap();
 
     const timeout = setTimeout(() => {
       setPhase((current) => (current === 'loading' ? 'welcome' : current));
-    }, 8000);
+    }, BOOTSTRAP_MAX_MS + 500);
 
     const advanceMateIfSignedIn = async () => {
       const savedRole = await getAppRole();

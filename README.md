@@ -6,7 +6,7 @@ TrotroOS connects passengers with trotro mates (drivers) on live routes across K
 
 | | |
 |---|---|
-| **Version** | 1.3.0 |
+| **Version** | 1.4.0 |
 | **Platform** | Android (primary), iOS-ready |
 | **Package** | `com.trotro.os` |
 | **Region** | Kumasi — GHS fares, on-board / MoMo payment |
@@ -97,6 +97,7 @@ Run the SQL scripts in the [supabase/](./supabase/) folder against your project:
 3. **`FIX_ratings.sql`** — ratings table
 4. **`FIX_mate_depart_now.sql`** — mate trip permissions
 5. **`FIX_live_demand.sql`** — passenger queue / Realtime
+6. **`FIX_mate_ride_requests.sql`** — mate invites waiting passengers (run `scripts/fix-mate-ride-requests.ps1`)
 
 See [supabase/README.md](./supabase/README.md) for full details.
 

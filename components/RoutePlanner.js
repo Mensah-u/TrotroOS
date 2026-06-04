@@ -25,6 +25,7 @@ import {
 import { SCREEN_GUTTER } from '@/constants/layout';
 import { Theme, glowShadow } from '@/constants/theme';
 import { hapticSelect } from '@/utils/haptics';
+import { estimateTripDuration } from '@/utils/rideEta';
 import { getSavedPlaces } from '@/services/savedPlaces';
 import { getRecentPlaces, rememberRecentPlace } from '@/services/recentPlaces';
 import { getMyLocationLabel } from '@/utils/myLocation';
@@ -47,6 +48,15 @@ export default function RoutePlanner({
   const selectedRoute = useMemo(
     () => findRouteByPlaces(fromPlace, toPlace),
     [fromPlace, toPlace],
+  );
+
+  const tripDuration = useMemo(
+    () => estimateTripDuration({
+      origin: fromPlace,
+      destination: toPlace,
+      routeMeta: selectedRoute,
+    }),
+    [fromPlace, toPlace, selectedRoute],
   );
 
   // Predefined options for the current picker field.
@@ -217,17 +227,19 @@ export default function RoutePlanner({
           ) : null}
         </View>
 
-        {selectedRoute ? (
+        {fromPlace && toPlace ? (
           <View style={styles.metaRow}>
-            <View style={styles.fareRow}>
-              <Ionicons name="cash-outline" size={16} color={Theme.colors.success} />
-              <Text style={styles.fareText}>GHS {selectedRoute.fareGhs}</Text>
-            </View>
-            {selectedRoute.tripEta ? (
+            {selectedRoute ? (
+              <View style={styles.fareRow}>
+                <Ionicons name="cash-outline" size={16} color={Theme.colors.success} />
+                <Text style={styles.fareText}>GHS {selectedRoute.fareGhs}</Text>
+              </View>
+            ) : null}
+            {tripDuration ? (
               <View style={styles.durationRow}>
                 <Ionicons name="time-outline" size={16} color={Theme.colors.passenger} />
                 <Text style={styles.durationText}>
-                  {selectedRoute.tripEta.min}–{selectedRoute.tripEta.max} min trip
+                  {tripDuration.label} trip
                 </Text>
               </View>
             ) : null}

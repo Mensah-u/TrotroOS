@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npm run build:web",
+  "outputDirectory": "dist",
+  "framework": null,
+  "rewrites": [
+    { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/((?!.*\\.).*)", "destination": "/index.html" }
+  ]
+}

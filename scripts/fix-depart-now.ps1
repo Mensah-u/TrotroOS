@@ -13,4 +13,4 @@ Write-Host "3. Paste in SQL Editor → Run"
 Write-Host "4. Wait 30 seconds, then Mate app, Depart Now again`n"
 
 Start-Process $url
-notepad $sqlFile
+Start-Process notepad $sqlFile

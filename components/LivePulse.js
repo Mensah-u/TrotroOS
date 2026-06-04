@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 
 /** Small pulsing dot for live GPS / realtime indicators. */
-export default function LivePulse({ color = '#22C55E', size = 8, style }) {
+import { Theme } from '@/constants/theme';
+
+export default function LivePulse({ color = Theme.colors.success, size = 8, style }) {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(1)).current;
 

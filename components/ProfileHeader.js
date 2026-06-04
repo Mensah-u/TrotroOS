@@ -2,10 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 const C = {
-  BG:     '#0C0C0C',
-  SURFACE:'#161616',
+  BG:     '#121212',
+  SURFACE:'#1E1E1E',
   BORDER: 'rgba(255,255,255,0.07)',
-  TEXT:   '#F9FAFB',
+  TEXT:   '#FFFFFF',
 };
 
 export default function ProfileHeader({ navigation, title }) {

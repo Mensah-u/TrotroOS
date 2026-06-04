@@ -82,6 +82,12 @@ export default function ProfileScreen({ navigation }) {
           sub: 'Star routes for one-tap booking',
           onPress: () => navigation.navigate('FavoriteRoutes'),
         },
+        {
+          icon: 'calendar-outline',
+          label: 'Scheduled rides',
+          sub: 'Commute times for school or work',
+          onPress: () => navigation.navigate('ScheduledRide'),
+        },
       ],
     },
     {
@@ -161,6 +167,12 @@ export default function ProfileScreen({ navigation }) {
           label: 'Safety tips',
           sub: 'Travel safely in Kumasi',
           onPress: () => navigation.navigate('Safety'),
+        },
+        {
+          icon: 'flag-outline',
+          label: 'Report issue',
+          sub: 'Disputes and safety reports',
+          onPress: () => navigation.navigate('SafetyReport'),
         },
       ],
     },

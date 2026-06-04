@@ -10,8 +10,8 @@ import ProfileHeader from '@/components/ProfileHeader';
 import { getPassengerProfile, savePassengerProfile } from '@/services/passengerProfile';
 
 const C = {
-  BG: '#0C0C0C', SURFACE: '#161616', BORDER: 'rgba(255,255,255,0.07)',
-  ACCENT: '#F97316', TEXT: '#F9FAFB', TEXT_SUB: '#9CA3AF', TEXT_MUTED: '#4B5563',
+  BG: '#121212', SURFACE: '#1E1E1E', BORDER: 'rgba(255,255,255,0.07)',
+  ACCENT: '#F36F21', TEXT: '#FFFFFF', TEXT_SUB: '#E0E0E0', TEXT_MUTED: '#A8A8A8',
 };
 
 export default function EditProfileScreen({ navigation }) {

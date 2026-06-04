@@ -2,45 +2,43 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Theme, glowShadow } from '@/constants/theme';
+import { Theme, getSeatStatus, glowShadow } from '@/constants/theme';
+import { PAYMENTS_ENABLED } from '@/constants/config';
+import { getVehicleIcon } from '@/constants/vehicleTypes';
 import { formatDistance } from '@/utils/rideEta';
+import { estimatePaymentTotal } from '@/utils/paymentMath';
 import { hapticSelect } from '@/utils/haptics';
 
 const C = {
-  ACCENT: '#F97316',
-  ACCENT_SOFT: 'rgba(249,115,22,0.14)',
-  SUCCESS: '#22C55E',
-  WARN: '#EAB308',
-  DANGER: '#EF4444',
-  FULL: '#7F1D1D',
-  TEXT: '#F9FAFB',
-  TEXT_SUB: '#9CA3AF',
-  TEXT_MUTED: '#4B5563',
-  BORDER: 'rgba(255,255,255,0.07)',
-  SURFACE: '#161616',
-  SURFACE_UP: '#1E1E1E',
+  ACCENT: Theme.colors.mate,
+  ACCENT_SOFT: Theme.colors.mateSoft,
+  SUCCESS: Theme.colors.success,
+  WARN: Theme.colors.seatFilling,
+  DANGER: Theme.colors.error,
+  FULL: Theme.colors.seatFull,
+  TEXT: Theme.colors.text,
+  TEXT_SUB: Theme.colors.textSub,
+  TEXT_MUTED: Theme.colors.textMuted,
+  BORDER: Theme.colors.border,
+  SURFACE: Theme.colors.surface,
+  SURFACE_UP: Theme.colors.surfaceUp,
 };
-
-function getSeatInfo(seats) {
-  if (seats === 0) return { label: 'Full', color: C.FULL, dot: '#EF4444' };
-  if (seats === 1) return { label: '1 seat left', color: C.DANGER, dot: '#F87171' };
-  if (seats <= 3) return { label: `${seats} seats`, color: C.WARN, dot: '#FDE047' };
-  return { label: `${seats} seats`, color: C.SUCCESS, dot: C.SUCCESS };
-}
 
 export default function RouteRideCard({
   trip,
   eta,
   demand,
   rating,
+  verifiedMate,
   selected,
   onSelect,
   onViewDetails,
   onReserve,
   onQueue,
+  onDismiss,
 }) {
   const isFull = trip.availableSeats === 0 || trip.status === 'full';
-  const { label, color, dot } = getSeatInfo(trip.availableSeats);
+  const { label, color, dot } = getSeatStatus(trip.availableSeats);
   const waitingCount = demand ?? 0;
   const isLiveEta = eta?.confidence === 'live';
 
@@ -69,6 +67,15 @@ export default function RouteRideCard({
 
       <View style={[styles.cardAccent, { backgroundColor: isFull ? C.FULL : selected ? Theme.colors.passenger : C.ACCENT }]} />
 
+      {onDismiss ? (
+        <Pressable
+          onPress={() => onDismiss(trip)}
+          hitSlop={10}
+          style={({ pressed }) => [styles.dismissBtn, pressed && { opacity: 0.7 }]}>
+          <Ionicons name="close" size={16} color={C.TEXT_MUTED} />
+        </Pressable>
+      ) : null}
+
       <View style={styles.cardInner}>
         {/* ETA hero row */}
         {!isFull ? (
@@ -96,7 +103,7 @@ export default function RouteRideCard({
           </View>
         ) : (
           <View style={styles.fullBanner}>
-            <Ionicons name="close-circle" size={16} color="#F87171" />
+            <Ionicons name="close-circle" size={16} color={C.DANGER} />
             <Text style={styles.fullBannerText}>Full — join the waiting queue</Text>
           </View>
         )}
@@ -109,7 +116,12 @@ export default function RouteRideCard({
               <Text style={styles.routeTo} numberOfLines={1}>{trip.destination}</Text>
               {trip.isLive ? <View style={[styles.livePulse, { backgroundColor: dot }]} /> : null}
             </View>
-            <Text style={styles.fareInline} numberOfLines={1}>{trip.fare} · pay on board</Text>
+            <Text style={styles.fareInline} numberOfLines={1}>
+              {trip.fare}
+              {PAYMENTS_ENABLED && trip.fareGhs > 0 && estimatePaymentTotal(trip.fareGhs)
+                ? ` · MoMo GHS ${estimatePaymentTotal(trip.fareGhs).totalGhs}`
+                : ' · pay on board'}
+            </Text>
             {waitingCount > 0 ? (
               <View style={styles.demandChip}>
                 <Ionicons name="people" size={11} color="#FBBF24" />
@@ -138,6 +150,12 @@ export default function RouteRideCard({
                   <Ionicons name="person" size={12} color={C.ACCENT} />
                 </View>
                 <Text style={styles.mateName} numberOfLines={1}>{trip.mateName}</Text>
+                {verifiedMate ? (
+                  <View style={styles.verifiedPill}>
+                    <Ionicons name="shield-checkmark" size={10} color={C.SUCCESS} />
+                    <Text style={styles.verifiedText}>Verified</Text>
+                  </View>
+                ) : null}
                 {rating?.avg ? (
                   <View style={styles.ratingPill}>
                     <Ionicons name="star" size={10} color="#FBBF24" />
@@ -149,7 +167,7 @@ export default function RouteRideCard({
             <View style={styles.mateBadges}>
               {trip.vehicleType ? (
                 <View style={styles.vehicleTypePill}>
-                  <Ionicons name="bus-outline" size={11} color={C.TEXT_SUB} />
+                  <Ionicons name={getVehicleIcon(trip.vehicleType)} size={11} color={C.TEXT_SUB} />
                   <Text style={styles.vehicleTypeText}>{trip.vehicleType}</Text>
                 </View>
               ) : null}
@@ -208,6 +226,7 @@ export default function RouteRideCard({
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
+    position: 'relative',
     backgroundColor: C.SURFACE,
     borderRadius: 18,
     marginBottom: 14,
@@ -221,6 +240,20 @@ const styles = StyleSheet.create({
   },
   cardFull: { opacity: 0.85 },
   cardAccent: { width: 4 },
+  dismissBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: C.SURFACE_UP,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: C.BORDER,
+  },
   cardInner: { flex: 1, padding: 16 },
 
   etaRow: {
@@ -269,7 +302,7 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 12,
   },
-  fullBannerText: { color: '#F87171', fontSize: 12, fontWeight: '700' },
+  fullBannerText: { color: C.DANGER, fontSize: 12, fontWeight: '700' },
 
   cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   cardHeaderText: { flex: 1, paddingRight: 12 },
@@ -321,6 +354,18 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(251,191,36,0.25)',
   },
   ratingText: { color: '#FBBF24', fontSize: 10, fontWeight: '800' },
+  verifiedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: 'rgba(34,197,94,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.35)',
+  },
+  verifiedText: { color: C.SUCCESS, fontSize: 9, fontWeight: '800' },
   mateBadges: { flexDirection: 'row', gap: 6 },
   vehicleTypePill: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -329,7 +374,7 @@ const styles = StyleSheet.create({
   },
   vehicleTypeText: { color: C.TEXT_SUB, fontSize: 11, fontWeight: '600' },
   platePill: {
-    backgroundColor: '#0C0C0C', borderRadius: 6,
+    backgroundColor: '#121212', borderRadius: 6,
     paddingHorizontal: 9, paddingVertical: 4,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
   },

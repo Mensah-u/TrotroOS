@@ -58,9 +58,10 @@ alter table public.trips enable row level security;
 -- Drop old/conflicting policies
 drop policy if exists "Mates manage own trips"        on public.trips;
 drop policy if exists "Anyone can read active trips"  on public.trips;
-drop policy if exists "Mates can insert own trips"  on public.trips;
-drop policy if exists "Mates can update own trips"  on public.trips;
-drop policy if exists "Mates can delete own trips"  on public.trips;
+drop policy if exists "Mates can insert own trips"    on public.trips;
+drop policy if exists "Mates can update own trips"    on public.trips;
+drop policy if exists "Mates can delete own trips"    on public.trips;
+drop policy if exists "Mates can read own trips"      on public.trips;
 drop policy if exists "Public can read active trips"  on public.trips;
 
 -- Mate: create a trip (Depart Now)

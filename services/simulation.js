@@ -132,13 +132,13 @@ export const MAP_INITIAL_REGION = {
 
 // Minimal dark map style (Google Maps only — ignored by Apple Maps).
 export const darkMapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#1a1a1a' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#9ca3af' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#1a1a1a' }] },
-  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#2a2a2a' }] },
+  { elementType: 'geometry', stylers: [{ color: '#1E1E1E' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#E0E0E0' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#1E1E1E' }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#1E1E1E' }] },
   { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2a2a2a' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#1a1a1a' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1E1E1E' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#1E1E1E' }] },
   { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#3a3a3a' }] },
   { featureType: 'transit', elementType: 'labels', stylers: [{ visibility: 'off' }] },
   { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0f0f0f' }] },

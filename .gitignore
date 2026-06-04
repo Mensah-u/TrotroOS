@@ -38,6 +38,7 @@ yarn-error.*
 .env*.local
 secrets/
 constants/config.secrets.js
+.cursor/
 
 # typescript
 *.tsbuildinfo

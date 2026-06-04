@@ -1,21 +1,105 @@
 /**
- * Payments client. Talks to the backend API which talks to Paystack.
+ * Paystack payments — Supabase Edge Functions (primary) or Express API (fallback).
  *
- * Important: the *only* source of truth for payment status is the server,
- * because Paystack confirms via webhook. The redirect URL after the user
- * pays is just a UI hint — we always poll `getPaymentStatus` until we see
- * a terminal status (`success` / `failed` / `cancelled`).
+ * Server calculates: seat_fare + 8% platform fee + 1 GHS request fee.
+ * Paystack confirms via webhook — never trust redirect URLs alone.
  */
 
+import * as WebBrowser from 'expo-web-browser';
+
 import { apiAvailable, apiFetch } from '@/services/apiClient';
+import { supabase } from '@/services/supabase';
 
 const POLL_INTERVAL_MS = 3_000;
 const MAX_POLL_DURATION_MS = 5 * 60_000;
 
-export async function initPayment({ reservationId, passengerId, amountGhs, channel = 'momo', email }) {
-  if (!apiAvailable()) {
-    return { ok: false, error: { message: 'payments unavailable — API not configured' } };
+async function initMateInvitePaymentEdge({ mateId, tripId, tripFare, email, passengerId }) {
+  const { data, error } = await supabase.functions.invoke('initialize-mate-invite-payment', {
+    body: { mateId, tripId, tripFare, email, passengerId },
+  });
+
+  if (error) {
+    const msg = error.message ?? 'edge function error';
+    const ctx = error.context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const body = await ctx.json();
+        return { ok: false, error: { message: body?.error ?? msg } };
+      } catch {
+        // fall through
+      }
+    }
+    const status = ctx?.status ?? error?.status;
+    if (status === 404 || /not found|failed to send/i.test(msg)) {
+      return {
+        ok: false,
+        error: {
+          message:
+            'Mate invite payment not deployed. Run npm run deploy:paystack (includes initialize-mate-invite-payment).',
+        },
+      };
+    }
+    return { ok: false, error: { message: msg } };
   }
+  if (!data?.ok) {
+    return { ok: false, error: { message: data?.error ?? 'init failed' } };
+  }
+  return {
+    ok: true,
+    data: {
+      reference: data.reference,
+      authorizationUrl: data.authorization_url,
+      accessCode: data.access_code,
+      amountInPesewas: data.amount_in_pesewas,
+      breakdown: data.breakdown,
+    },
+  };
+}
+
+async function initPaymentEdge({ userId, seatFare, email, reservationId }) {
+  const { data, error } = await supabase.functions.invoke('initialize-payment', {
+    body: { userId, seatFare, email, reservationId },
+  });
+
+  if (error) {
+    const msg = error.message ?? 'edge function error';
+    const ctx = error.context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const body = await ctx.json();
+        return { ok: false, error: { message: body?.error ?? msg } };
+      } catch {
+        // fall through
+      }
+    }
+    const status = ctx?.status ?? error?.status;
+    if (status === 404 || /not found|failed to send/i.test(msg)) {
+      return {
+        ok: false,
+        error: {
+          message:
+            'Payment service not deployed. Run npm run deploy:paystack on your PC (Supabase CLI + PAYSTACK_SECRET_KEY).',
+        },
+      };
+    }
+    return { ok: false, error: { message: msg } };
+  }
+  if (!data?.ok) {
+    return { ok: false, error: { message: data?.error ?? 'init failed' } };
+  }
+  return {
+    ok: true,
+    data: {
+      reference: data.reference,
+      authorizationUrl: data.authorization_url,
+      accessCode: data.access_code,
+      amountInPesewas: data.amount_in_pesewas,
+      breakdown: data.breakdown,
+    },
+  };
+}
+
+async function initPaymentApi({ reservationId, passengerId, amountGhs, channel, email }) {
   const { ok, data, error } = await apiFetch('/payments/init', {
     method: 'POST',
     body: { reservationId, passengerId, amountGhs, channel, email },
@@ -26,20 +110,123 @@ export async function initPayment({ reservationId, passengerId, amountGhs, chann
   return { ok: true, data };
 }
 
-export async function getPaymentStatus(reference) {
-  const { ok, data, error } = await apiFetch(`/payments/${encodeURIComponent(reference)}`);
-  if (!ok || !data) return { ok: false, error };
-  return { ok: true, data };
+/**
+ * Initialise a Paystack MoMo/card checkout.
+ * @param {{ userId: string, seatFare: number|string, email: string, reservationId?: string, channel?: string }} params
+ */
+export async function initPayment({
+  userId,
+  passengerId,
+  seatFare,
+  amountGhs,
+  email,
+  reservationId,
+  channel = 'momo',
+}) {
+  const payerId = userId ?? passengerId;
+  if (!payerId) {
+    return { ok: false, error: { message: 'userId is required' } };
+  }
+  if (!email?.trim()) {
+    return { ok: false, error: { message: 'email is required for Paystack' } };
+  }
+
+  const fare = seatFare ?? amountGhs;
+  if (fare == null) {
+    return { ok: false, error: { message: 'seatFare is required' } };
+  }
+
+  // Prefer Supabase Edge Function (secure fee calculation)
+  try {
+    const edge = await initPaymentEdge({
+      userId: payerId,
+      seatFare: fare,
+      email: email.trim(),
+      reservationId,
+    });
+    if (edge.ok) return edge;
+  } catch (e) {
+    // Fall through to Express API if edge function unavailable
+  }
+
+  if (!apiAvailable()) {
+    return { ok: false, error: { message: 'payments unavailable — configure Supabase Edge Functions or API_BASE_URL' } };
+  }
+
+  return initPaymentApi({
+    reservationId,
+    passengerId: payerId,
+    amountGhs: Number(fare),
+    channel,
+    email,
+  });
 }
 
 /**
- * Poll the backend until the payment is in a terminal state or we time out.
- * The redirect URL is NOT trusted — only the webhook-driven server status is.
- *
- * @param {string} reference
- * @param {{ onTick?: (status: string)=>void, intervalMs?: number, timeoutMs?: number }} [opts]
- * @returns {Promise<{ status: 'success'|'failed'|'cancelled'|'timeout', payment?: object }>}
+ * Initialise Paystack checkout for a mate seat invite (8% + GHS 1).
+ * @param {{ mateId: string, tripId: string, tripFare: number|string, email: string, passengerId?: string }} params
  */
+export async function initMateInvitePayment({
+  mateId,
+  tripId,
+  tripFare,
+  email,
+  passengerId,
+}) {
+  if (!mateId) return { ok: false, error: { message: 'mateId is required' } };
+  if (!tripId) return { ok: false, error: { message: 'tripId is required' } };
+  if (!email?.trim()) {
+    return { ok: false, error: { message: 'email is required for Paystack' } };
+  }
+  if (tripFare == null) {
+    return { ok: false, error: { message: 'tripFare is required' } };
+  }
+
+  try {
+    const edge = await initMateInvitePaymentEdge({
+      mateId,
+      tripId,
+      tripFare,
+      email: email.trim(),
+      passengerId,
+    });
+    if (edge.ok) return edge;
+    return edge;
+  } catch (e) {
+    return { ok: false, error: { message: e?.message ?? 'mate invite payment failed' } };
+  }
+}
+
+/** Open Paystack checkout in an in-app browser. */
+export async function openPaystackCheckout(authorizationUrl) {
+  if (!authorizationUrl) return { ok: false, error: { message: 'no authorization URL' } };
+  const result = await WebBrowser.openBrowserAsync(authorizationUrl, {
+    dismissButtonStyle: 'close',
+    enableBarCollapsing: true,
+  });
+  return { ok: true, result };
+}
+
+export async function getPaymentStatus(reference) {
+  const { data, error } = await supabase
+    .from('payment_transactions')
+    .select('*')
+    .eq('reference', reference)
+    .maybeSingle();
+
+  if (!error && data) {
+    return { ok: true, data: { ...data, status: data.status } };
+  }
+
+  if (apiAvailable()) {
+    const api = await apiFetch(`/payments/${encodeURIComponent(reference)}`);
+    if (api.ok && api.data) return { ok: true, data: api.data };
+  }
+
+  if (error) return { ok: false, error: { message: error.message } };
+  return { ok: false, error: { message: 'unknown reference' } };
+}
+
 export async function waitForPaymentConfirmation(reference, opts = {}) {
   const interval = opts.intervalMs ?? POLL_INTERVAL_MS;
   const timeout = opts.timeoutMs ?? MAX_POLL_DURATION_MS;
@@ -57,3 +244,5 @@ export async function waitForPaymentConfirmation(reference, opts = {}) {
   }
   return { status: 'timeout' };
 }
+
+export { estimatePaymentTotal, estimateMateInviteFee } from '@/utils/paymentMath';

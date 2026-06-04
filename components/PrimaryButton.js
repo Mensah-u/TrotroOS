@@ -26,7 +26,7 @@ export default function PrimaryButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.btn,
-        { backgroundColor: inactive ? '#4B5563' : accent, shadowColor: accent },
+        { backgroundColor: inactive ? '#A8A8A8' : accent, shadowColor: accent },
         inactive && styles.btnDisabled,
         pressed && !inactive && styles.btnPressed,
         style,

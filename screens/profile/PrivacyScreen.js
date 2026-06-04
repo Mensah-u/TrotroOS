@@ -9,8 +9,8 @@ import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { getPassengerProfile, savePassengerProfile } from '@/services/passengerProfile';
 
 const C = {
-  BG: '#0C0C0C', SURFACE: '#161616', BORDER: 'rgba(255,255,255,0.07)',
-  ACCENT: '#F97316', TEXT: '#F9FAFB', TEXT_SUB: '#9CA3AF', TEXT_MUTED: '#4B5563',
+  BG: '#121212', SURFACE: '#1E1E1E', BORDER: 'rgba(255,255,255,0.07)',
+  ACCENT: '#F36F21', TEXT: '#FFFFFF', TEXT_SUB: '#E0E0E0', TEXT_MUTED: '#A8A8A8',
 };
 
 export default function PrivacyScreen({ navigation }) {
@@ -40,7 +40,7 @@ export default function PrivacyScreen({ navigation }) {
               <Text style={styles.rowLabel}>Share location</Text>
               <Text style={styles.rowSub}>Let mates see you on the map when waiting or reserved</Text>
             </View>
-            <Switch value={shareLocation} onValueChange={onLocation} trackColor={{ false: '#333', true: 'rgba(249,115,22,0.5)' }} thumbColor={shareLocation ? C.ACCENT : '#888'} />
+            <Switch value={shareLocation} onValueChange={onLocation} trackColor={{ false: '#333', true: 'rgba(243,111,33,0.5)' }} thumbColor={shareLocation ? C.ACCENT : '#888'} />
           </View>
           <View style={styles.divider} />
           <View style={styles.row}>
@@ -49,7 +49,7 @@ export default function PrivacyScreen({ navigation }) {
               <Text style={styles.rowLabel}>Anonymous rider</Text>
               <Text style={styles.rowSub}>No personal account — only a random device ID is stored</Text>
             </View>
-            <Switch value={anonymousMode} onValueChange={onAnon} trackColor={{ false: '#333', true: 'rgba(249,115,22,0.5)' }} thumbColor={anonymousMode ? C.ACCENT : '#888'} />
+            <Switch value={anonymousMode} onValueChange={onAnon} trackColor={{ false: '#333', true: 'rgba(243,111,33,0.5)' }} thumbColor={anonymousMode ? C.ACCENT : '#888'} />
           </View>
         </View>
 
@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
   rowLabel: { color: C.TEXT, fontSize: 15, fontWeight: '600' },
   rowSub: { color: C.TEXT_MUTED, fontSize: 12, marginTop: 2 },
   divider: { height: 1, backgroundColor: C.BORDER, marginLeft: 64 },
-  infoCard: { flexDirection: 'row', gap: 12, backgroundColor: 'rgba(249,115,22,0.08)', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(249,115,22,0.25)' },
+  infoCard: { flexDirection: 'row', gap: 12, backgroundColor: 'rgba(243,111,33,0.08)', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: 'rgba(243,111,33,0.25)' },
   infoText: { flex: 1, color: C.TEXT_SUB, fontSize: 13, lineHeight: 19 },
   linkRow: {
     flexDirection: 'row',

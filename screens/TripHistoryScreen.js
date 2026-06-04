@@ -1,14 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 
 import BrandedLoader from '@/components/BrandedLoader';
 import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { formatRoute, getRouteFare, routes } from '@/constants/routes';
+import { formatSupabaseError } from '@/utils/supabaseErrors';
 import { getOrCreateDeviceId } from '@/services/passengerProfile';
 import {
+  cancelReservation,
+  deleteDriverLocation,
+  endTrip,
   getCurrentMate,
   getMateTripHistory,
   getPassengerHistory,
@@ -16,19 +20,7 @@ import {
   subscribeToPassengerHistory,
   supabase,
 } from '@/services/supabase';
-
-const C = {
-  BG:         '#0C0C0C',
-  SURFACE:    '#161616',
-  SURFACE_UP: '#1E1E1E',
-  BORDER:     'rgba(255,255,255,0.07)',
-  ACCENT:     '#F97316',
-  SUCCESS:    '#22C55E',
-  DANGER:     '#EF4444',
-  TEXT:       '#F9FAFB',
-  TEXT_SUB:   '#9CA3AF',
-  TEXT_MUTED: '#4B5563',
-};
+import { C } from '@/constants/theme';
 
 const TABS = [
   { id: 'passenger', label: 'My Rides',  icon: 'person' },
@@ -66,11 +58,20 @@ function fareForRoute(routeLabel) {
 }
 
 // ─── Row components ──────────────────────────────────────────────────────────
-function PassengerRow({ reservation }) {
+function PassengerRow({ reservation, navigation, onCloseRide }) {
   const trip = reservation.trips ?? {};
   const mate = trip.mate_profiles ?? {};
   const s    = statusMeta(reservation.status);
   const fare = fareForRoute(trip.route ?? '');
+  const canClose = reservation.status === 'active';
+
+  const bookAgain = () => {
+    const parts = (trip.route ?? '').split('→').map((p) => p.trim());
+    navigation.getParent()?.navigate('Find Ride', {
+      prefillFrom: trip.origin ?? parts[0],
+      prefillTo: trip.destination ?? parts[1],
+    });
+  };
 
   return (
     <View style={styles.card}>
@@ -110,16 +111,26 @@ function PassengerRow({ reservation }) {
             <Text style={styles.fareText}>GHS {fare}</Text>
           </View>
         ) : null}
+        <Pressable onPress={bookAgain} style={styles.rebookBtn}>
+          <Text style={styles.rebookText}>Book again</Text>
+        </Pressable>
+        {canClose ? (
+          <Pressable onPress={() => onCloseRide?.(reservation)} style={styles.closeRideBtn}>
+            <Ionicons name="close-outline" size={14} color={C.DANGER} />
+            <Text style={styles.closeRideText}>Close ride</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
 }
 
-function MateTripRow({ trip }) {
+function MateTripRow({ trip, onCloseTrip }) {
   const s = statusMeta(trip.status);
   const occupied = (trip.total_seats ?? 0) - (trip.available_seats ?? 0);
   const fare = fareForRoute(trip.route ?? '');
   const estEarnings = occupied * fare;
+  const canClose = trip.status === 'active' || trip.status === 'full';
 
   return (
     <View style={styles.card}>
@@ -151,6 +162,12 @@ function MateTripRow({ trip }) {
           <View style={styles.farePill}>
             <Text style={styles.fareText}>~GHS {estEarnings}</Text>
           </View>
+        ) : null}
+        {canClose ? (
+          <Pressable onPress={() => onCloseTrip?.(trip)} style={styles.closeRideBtn}>
+            <Ionicons name="close-outline" size={14} color={C.DANGER} />
+            <Text style={styles.closeRideText}>Close trip</Text>
+          </Pressable>
         ) : null}
       </View>
     </View>
@@ -229,6 +246,53 @@ export default function TripHistoryScreen({ navigation }) {
     loadHistory(false);
   }, [loadHistory]);
 
+  const handleClosePassengerRide = useCallback((reservation) => {
+    Alert.alert(
+      'Close ride?',
+      'Your seat will be released and this ride removed from your active list.',
+      [
+        { text: 'Keep ride', style: 'cancel' },
+        {
+          text: 'Close ride',
+          style: 'destructive',
+          onPress: async () => {
+            const did = deviceId ?? (await getOrCreateDeviceId());
+            if (!did) return;
+            const { ok } = await cancelReservation(reservation.id, did);
+            if (!ok) {
+              Alert.alert('Unable to close ride', 'Please try again in a moment.');
+              return;
+            }
+            loadHistory(false);
+          },
+        },
+      ],
+    );
+  }, [deviceId, loadHistory]);
+
+  const handleCloseMateTrip = useCallback((trip) => {
+    Alert.alert(
+      'Close trip?',
+      'This trip will be marked completed and removed from the live map for passengers.',
+      [
+        { text: 'Keep trip', style: 'cancel' },
+        {
+          text: 'Close trip',
+          style: 'destructive',
+          onPress: async () => {
+            const { error: endErr } = await endTrip(trip.id);
+            if (endErr) {
+              Alert.alert('Unable to close trip', formatSupabaseError(endErr.message ?? 'Please sign in as a mate and try again.'));
+              return;
+            }
+            await deleteDriverLocation(mateUserId);
+            loadHistory(false);
+          },
+        },
+      ],
+    );
+  }, [mateUserId, loadHistory]);
+
   if (loading) return <BrandedLoader message="Loading history" />;
 
   const data = tab === 'passenger' ? reservations : trips;
@@ -275,7 +339,7 @@ export default function TripHistoryScreen({ navigation }) {
         <View style={styles.liveBanner}>
           <View style={styles.liveDot} />
           <Text style={styles.liveBannerText}>
-            {activeCount} live {tab === 'mate' ? 'trip' : 'ride'}{activeCount === 1 ? '' : 's'} · updates automatically
+            {activeCount} live {tab === 'mate' ? 'trip' : 'ride'}{activeCount === 1 ? '' : 's'} · tap Close to remove
           </Text>
         </View>
       ) : null}
@@ -288,7 +352,15 @@ export default function TripHistoryScreen({ navigation }) {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.ACCENT} />
         }
         renderItem={({ item }) =>
-          tab === 'passenger' ? <PassengerRow reservation={item} /> : <MateTripRow trip={item} />
+          tab === 'passenger' ? (
+            <PassengerRow
+              reservation={item}
+              navigation={navigation}
+              onCloseRide={handleClosePassengerRide}
+            />
+          ) : (
+            <MateTripRow trip={item} onCloseTrip={handleCloseMateTrip} />
+          )
         }
         ListEmptyComponent={
           tab === 'passenger' ? (
@@ -313,7 +385,7 @@ const styles = StyleSheet.create({
 
   tabRow:       { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
   tab:          { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, backgroundColor: C.SURFACE, borderWidth: 1, borderColor: C.BORDER },
-  tabActive:    { borderColor: C.ACCENT + '70', backgroundColor: 'rgba(249,115,22,0.08)' },
+  tabActive:    { borderColor: C.ACCENT + '70', backgroundColor: 'rgba(243,111,33,0.08)' },
   tabText:      { color: C.TEXT_SUB, fontSize: 13, fontWeight: '700' },
   tabTextActive:{ color: C.ACCENT },
 
@@ -325,7 +397,7 @@ const styles = StyleSheet.create({
 
   card:         { backgroundColor: C.SURFACE, borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: C.BORDER },
   cardTop:      { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  cardIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(249,115,22,0.1)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(249,115,22,0.3)' },
+  cardIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(243,111,33,0.1)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(243,111,33,0.3)' },
   cardMain:     { flex: 1, paddingRight: 8, minWidth: 0 },
   cardTitle:    { color: C.TEXT, fontSize: 16, fontWeight: '800', letterSpacing: -0.2 },
   cardSub:      { color: C.TEXT_SUB, fontSize: 12, fontWeight: '500', marginTop: 3 },
@@ -338,10 +410,24 @@ const styles = StyleSheet.create({
   metaItem:     { flexDirection: 'row', alignItems: 'center', gap: 5 },
   metaText:     { color: C.TEXT_SUB, fontSize: 12, fontWeight: '500' },
 
-  platePill:    { marginLeft: 'auto', backgroundColor: '#0C0C0C', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  platePill:    { marginLeft: 'auto', backgroundColor: '#121212', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
   plateText:    { color: C.TEXT, fontSize: 11, fontWeight: '800', letterSpacing: 1, fontFamily: 'monospace' },
   farePill:     { backgroundColor: 'rgba(34,197,94,0.12)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: 'rgba(34,197,94,0.25)' },
   fareText:     { color: C.SUCCESS, fontSize: 11, fontWeight: '800' },
+  rebookBtn:    { marginLeft: 'auto', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: C.ACCENT + '55' },
+  rebookText:   { color: C.ACCENT, fontSize: 11, fontWeight: '800' },
+  closeRideBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.DANGER + '55',
+    backgroundColor: 'rgba(255,82,82,0.08)',
+  },
+  closeRideText: { color: C.DANGER, fontSize: 11, fontWeight: '800' },
 
   empty:        { alignItems: 'center', paddingTop: 64, gap: 10 },
   emptyIcon:    { width: 64, height: 64, borderRadius: 20, backgroundColor: C.SURFACE, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.BORDER, marginBottom: 4 },

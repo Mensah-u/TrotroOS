@@ -3,9 +3,64 @@ import { createClient } from '@supabase/supabase-js';
 import * as Linking from 'expo-linking';
 
 import { SUPABASE_ANON_KEY, SUPABASE_URL, assertClientConfig } from '@/constants/config';
+import { DEFAULT_VEHICLE_TYPE } from '@/constants/vehicleTypes';
 import { boundingBox, withinBbox } from '@/utils/geo';
 
 assertClientConfig();
+
+/** Passenger RLS uses this header (see supabase/FIX_security_hardening.sql). */
+let passengerDeviceId = null;
+
+export function setSupabaseDeviceId(deviceId) {
+  passengerDeviceId = deviceId?.trim() || null;
+}
+
+export function getSupabaseDeviceId() {
+  return passengerDeviceId;
+}
+
+const RETRYABLE_CODES = new Set(['57P01', '53300', '08006', '08001', '40001']);
+
+export async function withSupabaseRetry(fn, { maxAttempts = 3, baseMs = 300 } = {}) {
+  let last;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    last = await fn();
+    if (!last?.error) return last;
+
+    const code = last.error?.code ?? '';
+    const msg = last.error?.message ?? '';
+    const retryable =
+      RETRYABLE_CODES.has(code)
+      || /timeout|connection|pool|maintenance|503|502|fetch failed/i.test(msg);
+
+    if (!retryable || attempt === maxAttempts) return last;
+
+    const delay = baseMs * 2 ** (attempt - 1) + Math.random() * 100;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  return last;
+}
+
+function requestTimeoutSignal(ms) {
+  if (typeof AbortSignal?.timeout === 'function') {
+    return AbortSignal.timeout(ms);
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
+function supabaseFetch(url, options = {}) {
+  const headers = new Headers(options.headers ?? {});
+  if (passengerDeviceId) {
+    headers.set('x-device-id', passengerDeviceId);
+  }
+  const init = { ...options, headers };
+  if (!init.signal) {
+    init.signal = requestTimeoutSignal(__DEV__ ? 12_000 : 15_000);
+  }
+  return fetch(url, init);
+}
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
@@ -14,6 +69,74 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     persistSession: true,
     detectSessionInUrl: false,
   },
+  global: {
+    fetch: supabaseFetch,
+  },
+});
+
+function isStaleAuthError(err) {
+  const msg = err?.message ?? String(err ?? '');
+  return /refresh token|invalid.*token|session.*not found|jwt expired/i.test(msg);
+}
+
+function supabaseProjectRef() {
+  try {
+    const host = new URL(SUPABASE_URL).hostname;
+    return host.split('.')[0] || '';
+  } catch {
+    return '';
+  }
+}
+
+async function purgeLocalAuthStorage() {
+  const ref = supabaseProjectRef();
+  if (!ref) return;
+  const key = `sb-${ref}-auth-token`;
+  try {
+    await AsyncStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+/** Clear broken mate sessions (e.g. after DB reset or expired refresh token). */
+export async function clearStaleAuthSession() {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error && isStaleAuthError(error)) {
+      await supabase.auth.signOut({ scope: 'local' });
+      await purgeLocalAuthStorage();
+      return true;
+    }
+    if (data?.session) {
+      const { error: userError } = await supabase.auth.getUser();
+      if (userError && isStaleAuthError(userError)) {
+        await supabase.auth.signOut({ scope: 'local' });
+        await purgeLocalAuthStorage();
+        return true;
+      }
+    }
+  } catch (err) {
+    if (isStaleAuthError(err)) {
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+        await purgeLocalAuthStorage();
+        return true;
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return false;
+}
+
+clearStaleAuthSession().catch(() => {});
+
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_OUT' || session) return;
+  if (event === 'INITIAL_SESSION' && !session) {
+    purgeLocalAuthStorage().catch(() => {});
+  }
 });
 
 // ─── Table names ────────────────────────────────────────────────────────────
@@ -38,7 +161,25 @@ export const signInMate = (email, password) =>
   supabase.auth.signInWithPassword({ email, password });
 export const signOutMate = () => supabase.auth.signOut();
 export const getCurrentMate = () => supabase.auth.getUser();
-export const getMateSession = () => supabase.auth.getSession();
+export async function getMateSession() {
+  try {
+    const result = await Promise.race([
+      supabase.auth.getSession(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Session check timed out')), 8000);
+      }),
+    ]);
+    if (result?.error && isStaleAuthError(result.error)) {
+      await supabase.auth.signOut({ scope: 'local' });
+      await purgeLocalAuthStorage();
+      return { data: { session: null }, error: null };
+    }
+    return result;
+  } catch {
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    return { data: { session: null }, error: null };
+  }
+}
 
 // ─── Mate profiles ───────────────────────────────────────────────────────────
 export function getMateProfile(userId) {
@@ -75,15 +216,26 @@ export async function ensureMateProfile(user) {
     full_name: meta.full_name ?? user.email?.split('@')[0] ?? 'Mate',
     phone_number: meta.phone_number ?? '0000000000',
     vehicle_registration: meta.vehicle_registration ?? 'PENDING',
-    vehicle_type: meta.vehicle_type ?? 'Trotro',
+    vehicle_type: meta.vehicle_type ?? DEFAULT_VEHICLE_TYPE,
   });
   return { error };
 }
 
 // ─── Driver locations ────────────────────────────────────────────────────────
-export async function upsertDriverLocation(_mateId, route, latitude, longitude, availableSeats, heading = null) {
+export async function upsertDriverLocation(
+  _mateId,
+  route,
+  latitude,
+  longitude,
+  availableSeats,
+  heading = null,
+  fareGhs = null,
+) {
   const { user, error: authError } = await requireMateSession();
-  if (authError) return Promise.reject(new Error(authError.message));
+  if (authError) return { data: null, error: authError };
+
+  const fare =
+    fareGhs != null && Number(fareGhs) > 0 ? Number(fareGhs) : null;
 
   const payload = {
     mate_id: user.id,
@@ -92,14 +244,23 @@ export async function upsertDriverLocation(_mateId, route, latitude, longitude, 
     heading,
     updated_at: new Date().toISOString(),
   };
-  if (latitude != null) payload.latitude  = latitude;
+  if (latitude != null) payload.latitude = latitude;
   if (longitude != null) payload.longitude = longitude;
-  return supabase.from(T.DRIVER_LOCATIONS).upsert(payload, { onConflict: 'mate_id' });
+  if (fare != null) payload.fare_ghs = fare;
+
+  let result = await supabase.from(T.DRIVER_LOCATIONS).upsert(payload, { onConflict: 'mate_id' });
+
+  if (result.error && fare != null && /fare_ghs|schema cache/i.test(result.error.message ?? '')) {
+    delete payload.fare_ghs;
+    result = await supabase.from(T.DRIVER_LOCATIONS).upsert(payload, { onConflict: 'mate_id' });
+  }
+
+  return result;
 }
 
 export async function deleteDriverLocation(_mateId) {
   const { user, error: authError } = await requireMateSession();
-  if (authError) return Promise.reject(new Error(authError.message));
+  if (authError) return { data: null, error: authError };
   return supabase.from(T.DRIVER_LOCATIONS).delete().eq('mate_id', user.id);
 }
 
@@ -124,6 +285,48 @@ export async function fetchNearbyDriverLocations(center, radiusKm = 2) {
       .lte('longitude', bbox.maxLng);
   }
   return q;
+}
+
+/** Single mate GPS row — used when passenger is tracking a reserved ride. */
+export async function fetchDriverLocationByMateId(mateId) {
+  if (!mateId) return { data: null, error: { message: 'No mate id' } };
+  return supabase.from(T.DRIVER_LOCATIONS).select('*').eq('mate_id', mateId).maybeSingle();
+}
+
+/**
+ * Realtime subscription for one mate's driver_locations row.
+ * Bypasses geo bbox so reserved-ride tracking works at any distance.
+ */
+export function subscribeToDriverLocationByMateId(mateId, callback) {
+  if (!mateId) return null;
+
+  const reload = () => {
+    fetchDriverLocationByMateId(mateId).then(({ data, error }) => {
+      if (error) {
+        console.warn('[TrotroOS] driver location by mate failed:', error.message);
+        return;
+      }
+      callback(data ?? null);
+    });
+  };
+
+  reload();
+
+  const channel = supabase
+    .channel(uniqueChannel(`driver_loc_${mateId}`))
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: T.DRIVER_LOCATIONS,
+        filter: `mate_id=eq.${mateId}`,
+      },
+      () => reload(),
+    )
+    .subscribe();
+
+  return channel;
 }
 
 /**
@@ -182,53 +385,119 @@ async function requireMateSession() {
   return { user: session.user, error: null };
 }
 
-export async function createTrip(_mateId, route, origin, destination, totalSeats) {
+export function isMateAuthError(error) {
+  const msg = typeof error === 'string' ? error : error?.message;
+  return /not signed in/i.test(msg ?? '');
+}
+
+export async function createTrip(_mateId, route, origin, destination, totalSeats, fareGhs = null) {
   const { user, error: authError } = await requireMateSession();
   if (authError) return { data: null, error: authError };
 
   const { error: profileError } = await ensureMateProfile(user);
   if (profileError) return { data: null, error: profileError };
 
-  const { data: rpcData, error: rpcError } = await supabase.rpc('create_mate_trip', {
-    p_route:         route,
-    p_origin:        origin,
-    p_destination:   destination,
-    p_total_seats:   totalSeats,
+  const fare =
+    fareGhs != null && Number(fareGhs) > 0 ? Number(fareGhs) : null;
+
+  const rpcBase = {
+    p_route:       route,
+    p_origin:      origin,
+    p_destination: destination,
+    p_total_seats: totalSeats,
+  };
+
+  let { data: rpcData, error: rpcError } = await supabase.rpc('create_mate_trip', {
+    ...rpcBase,
+    ...(fare != null ? { p_fare_ghs: fare } : {}),
   });
 
+  // Older RPC (4 args) — retry without p_fare_ghs, then patch fare on the row.
+  if (rpcError && fare != null && /p_fare_ghs|could not find|does not exist/i.test(rpcError.message ?? '')) {
+    ({ data: rpcData, error: rpcError } = await supabase.rpc('create_mate_trip', rpcBase));
+  }
+
   if (!rpcError && rpcData?.ok === true && rpcData?.trip) {
-    return { data: rpcData.trip, error: null };
+    const trip = rpcData.trip;
+    if (fare != null && trip.fare_ghs == null) {
+      const { data: patched } = await supabase
+        .from(T.TRIPS)
+        .update({ fare_ghs: fare })
+        .eq('id', trip.id)
+        .select()
+        .single();
+      if (patched) return { data: patched, error: null };
+    }
+    return { data: trip, error: null };
   }
 
   if (!rpcError && rpcData?.ok === false) {
     return { data: null, error: { message: rpcData.error ?? 'Could not start trip' } };
   }
 
-  // Fallback if RPC not deployed yet (run FIX_mate_depart_now.sql)
-  const direct = await supabase
+  // Fallback if RPC not deployed yet (run FIX_mate_depart_now.sql + FIX_trip_fare.sql)
+  const insertRow = {
+    mate_id:          user.id,
+    route,
+    origin,
+    destination,
+    total_seats:      totalSeats,
+    available_seats:  totalSeats,
+    status:           'active',
+  };
+  if (fare != null) insertRow.fare_ghs = fare;
+
+  let direct = await supabase
     .from(T.TRIPS)
-    .insert({
-      mate_id:          user.id,
-      route,
-      origin,
-      destination,
-      total_seats:      totalSeats,
-      available_seats:  totalSeats,
-      status:           'active',
-    })
+    .insert(insertRow)
     .select()
     .single();
+
+  if (direct.error && fare != null && /fare_ghs|schema cache/i.test(direct.error.message ?? '')) {
+    delete insertRow.fare_ghs;
+    direct = await supabase.from(T.TRIPS).insert(insertRow).select().single();
+  }
 
   if (direct.error && rpcError) {
     return { data: null, error: { message: rpcError.message } };
   }
 
+  if (!direct.error && direct.data && fare != null && direct.data.fare_ghs == null) {
+    const { data: patched } = await supabase
+      .from(T.TRIPS)
+      .update({ fare_ghs: fare })
+      .eq('id', direct.data.id)
+      .select()
+      .single();
+    if (patched) return { data: patched, error: null };
+  }
+
   return direct;
+}
+
+export async function updateTripFare(tripId, fareGhs) {
+  const { error: authError } = await requireMateSession();
+  if (authError) return { data: null, error: authError };
+
+  const fare = fareGhs != null && Number(fareGhs) > 0 ? Number(fareGhs) : null;
+  if (fare == null) return { data: null, error: null };
+
+  const result = await supabase
+    .from(T.TRIPS)
+    .update({ fare_ghs: fare })
+    .eq('id', tripId)
+    .select()
+    .single();
+
+  if (result.error && /fare_ghs|schema cache/i.test(result.error.message ?? '')) {
+    return { data: null, error: result.error };
+  }
+  return result;
 }
 
 export async function updateTripSeats(tripId, newAvailableSeats, status) {
   const { error: authError } = await requireMateSession();
-  if (authError) return Promise.reject(new Error(authError.message));
+  if (authError) return { data: null, error: authError };
 
   const patch = { available_seats: newAvailableSeats };
   if (status !== undefined) patch.status = status;
@@ -237,7 +506,7 @@ export async function updateTripSeats(tripId, newAvailableSeats, status) {
 
 export async function endTrip(tripId) {
   const { error: authError } = await requireMateSession();
-  if (authError) return Promise.reject(new Error(authError.message));
+  if (authError) return { data: null, error: authError };
 
   return supabase.from(T.TRIPS).update({ status: 'completed', available_seats: 0 }).eq('id', tripId);
 }
@@ -360,7 +629,14 @@ export function isPassengerLocationsAvailable() {
   return passengerLocationsSupported;
 }
 
-export async function upsertPassengerLocation(deviceId, reservationId, latitude, longitude, queuedRoute = null) {
+export async function upsertPassengerLocation(
+  deviceId,
+  reservationId,
+  latitude,
+  longitude,
+  queuedRoute = null,
+  pickupStop = null,
+) {
   if (!passengerLocationsSupported) {
     return { data: null, error: null };
   }
@@ -372,6 +648,7 @@ export async function upsertPassengerLocation(deviceId, reservationId, latitude,
     updated_at:      new Date().toISOString(),
   };
   if (queuedRoute !== undefined) payload.queued_route = queuedRoute ?? null;
+  if (pickupStop !== undefined && pickupStop !== null) payload.pickup_stop = pickupStop;
   const result = await supabase
     .from(T.PASSENGER_LOCATIONS)
     .upsert(payload, { onConflict: 'passenger_id' });
@@ -491,7 +768,7 @@ export async function ensurePassengerProfileExists(deviceId) {
       ok: false,
       error: {
         message:
-          'Could not save passenger profile. Run supabase/FIX_passenger_profiles_and_reservations.sql in Supabase SQL Editor.',
+          'We could not save your passenger profile. Please try again or contact support if this continues.',
       },
     };
   }
@@ -519,7 +796,7 @@ export async function createReservation(tripId, passengerId = null) {
         data: null,
         error: {
           message:
-            'Passenger profile table is missing in Supabase. Run supabase/FIX_passenger_profiles_and_reservations.sql in the SQL Editor.',
+            'Passenger profiles are temporarily unavailable. Please try again later or contact support.',
         },
       };
     }
@@ -580,13 +857,13 @@ export async function getActiveMateTrip(_mateId) {
 }
 
 export function subscribeToReservations(tripId, callback) {
-  const fetchAll = () =>
-    supabase
-      .from(T.RESERVATIONS)
-      .select('*')
-      .eq('trip_id', tripId)
-      .eq('status', 'active')
-      .then(({ data }) => { callback({ type: 'sync', reservations: data ?? [] }); });
+  const fetchAll = async () => {
+    const { data, error } = await fetchMateTripReservations(tripId);
+    if (error && !isMateAuthError(error)) {
+      console.warn('[Mate] reservations sync failed:', error.message ?? error);
+    }
+    callback({ type: 'sync', reservations: data ?? [] });
+  };
 
   fetchAll();
 
@@ -606,7 +883,7 @@ export function subscribeToReservations(tripId, callback) {
 }
 
 export function fetchTripById(tripId) {
-  return supabase.from(T.TRIPS).select('*').eq('id', tripId).maybeSingle();
+  return supabase.from(T.TRIPS).select(TRIPS_SELECT_WITH_MATE).eq('id', tripId).maybeSingle();
 }
 
 export function fetchActiveReservationsForTrip(tripId) {
@@ -614,7 +891,34 @@ export function fetchActiveReservationsForTrip(tripId) {
     .from(T.RESERVATIONS)
     .select('*')
     .eq('trip_id', tripId)
-    .eq('status', 'active');
+    .eq('status', 'active')
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: true });
+}
+
+/** Active seat holds for the signed-in mate's trip (RPC + direct fallback). */
+export async function fetchMateTripReservations(tripId) {
+  if (!tripId) {
+    return { data: [], error: { message: 'Missing trip ID' } };
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc('get_mate_trip_reservations', {
+    p_trip_id: tripId,
+  });
+
+  if (!rpcError && rpcData?.ok === true) {
+    const rows = Array.isArray(rpcData.reservations) ? rpcData.reservations : [];
+    return { data: rows, error: null };
+  }
+
+  const { error: authError } = await requireMateSession();
+  if (authError) return { data: [], error: authError };
+
+  const direct = await fetchActiveReservationsForTrip(tripId);
+  if (direct.error && rpcError) {
+    return { data: [], error: direct.error ?? rpcError };
+  }
+  return { data: direct.data ?? [], error: direct.error };
 }
 
 /** Real-time updates for a single active trip (seat count, status). */

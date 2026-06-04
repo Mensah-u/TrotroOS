@@ -76,7 +76,7 @@ export default function DataPrivacyScreen({ navigation }) {
           style: 'destructive',
           onPress: async () => {
             await clearPassengerLocalCache();
-            Alert.alert('Done', 'Local cache cleared.');
+            Alert.alert('Cache cleared', 'Local cache has been cleared.');
           },
         },
       ],

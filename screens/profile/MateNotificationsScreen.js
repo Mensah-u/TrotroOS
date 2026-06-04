@@ -22,7 +22,7 @@ function ToggleRow({ icon, label, sub, value, onValueChange }) {
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: '#333', true: 'rgba(249,115,22,0.5)' }}
+        trackColor={{ false: '#333', true: 'rgba(243,111,33,0.5)' }}
         thumbColor={value ? Theme.colors.mate : '#888'}
       />
     </View>

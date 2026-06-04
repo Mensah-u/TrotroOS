@@ -11,13 +11,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SafeMapView, { canUseNativeMap, SafeCallout, SafeMarker, SafePolyline } from '@/components/SafeMapView';
+import InteractiveWebMap from '@/components/InteractiveWebMap';
+import RouteDirectionArrow from '@/components/RouteDirectionArrow';
+import { GOOGLE_MAPS_WEB_KEY } from '@/constants/config';
 import PulsingMapMarker from '@/components/PulsingMapMarker';
 import MapClusterMarker from '@/components/MapClusterMarker';
 import StaticMapDot from '@/components/StaticMapDot';
 
 import { getPlaceCoords } from '@/services/staticData';
 import { SCREEN_GUTTER } from '@/constants/layout';
-import { darkMapStyle, Theme, glowShadow } from '@/constants/theme';
+import { darkMapStyle, Theme, getSeatStatus, glowShadow } from '@/constants/theme';
 import { hapticSelect } from '@/utils/haptics';
 import useViewportClusters from '@/hooks/useViewportClusters';
 import { regionForCluster } from '@/utils/clustering';
@@ -31,6 +34,7 @@ const MAP_INITIAL_REGION = {
 
 /** Animated / nested marker views inside MapView crash Android (addViewAt). */
 const ANDROID_SAFE_MAP = Platform.OS === 'android';
+const USE_WEB_GOOGLE_MAP = Platform.OS === 'web' && Boolean(GOOGLE_MAPS_WEB_KEY?.trim());
 const MARKER_TRACKS_CHANGES = !ANDROID_SAFE_MAP;
 const ANDROID_MARKER_LIMIT = 30;
 
@@ -76,7 +80,7 @@ function ReservedVehicleMarker({ driver, trip }) {
         title="Your ride"
         description={trip?.plate ?? trip?.mateName ?? undefined}
         zIndex={999}>
-        <StaticMapDot color={Theme.colors.mate} size={28} />
+        <StaticMapDot color={Theme.colors.mateMap} size={28} />
       </SafeMarker>
     );
   }
@@ -88,7 +92,7 @@ function ReservedVehicleMarker({ driver, trip }) {
       tracksViewChanges={MARKER_TRACKS_CHANGES}
       zIndex={999}>
       <PulsingMapMarker
-        color={Theme.colors.mate}
+        color={Theme.colors.mateMap}
         size={44}
         icon="bus"
         label="YOUR RIDE"
@@ -111,12 +115,8 @@ function ReservedVehicleMarker({ driver, trip }) {
 }
 
 function RideMarker({ driver, trip, selected, dimmed, onSelect, onReserve }) {
+  const { color: baseColor } = getSeatStatus(driver.available_seats);
   const isFull = driver.available_seats === 0;
-  const baseColor = isFull
-    ? '#7F1D1D'
-    : selected
-      ? Theme.colors.passenger
-      : Theme.colors.mate;
 
   if (ANDROID_SAFE_MAP) {
     return (
@@ -165,7 +165,7 @@ function RideMarker({ driver, trip, selected, dimmed, onSelect, onReserve }) {
           {trip?.mateName ? <Text style={styles.calloutMeta}>{trip.mateName}</Text> : null}
           {trip?.plate ? <Text style={styles.calloutPlate}>{trip.plate}</Text> : null}
           {trip?.eta ? <Text style={styles.calloutEta}>Arrives in {trip.eta.label}</Text> : null}
-          <Text style={[styles.calloutSeats, isFull && { color: '#F87171' }]}>
+          <Text style={[styles.calloutSeats, isFull && { color: Theme.colors.error }]}>
             {isFull ? 'Full' : `${driver.available_seats} seats · Tap to choose`}
           </Text>
         </View>
@@ -191,9 +191,13 @@ function MapCanvas({
   style,
 }) {
   const routeLine = useMemo(() => {
-    if (!originCoords || !destCoords) return [];
-    return [originCoords, destCoords];
-  }, [originCoords, destCoords]);
+    if (originCoords && destCoords) return [originCoords, destCoords];
+    if (passengerCoords && destCoords) return [passengerCoords, destCoords];
+    return [];
+  }, [originCoords, destCoords, passengerCoords]);
+
+  const routeFrom = routeLine[0] ?? null;
+  const routeTo = routeLine[1] ?? null;
 
   const initialRegion = useMemo(() => {
     if (passengerCoords) {
@@ -238,18 +242,6 @@ function MapCanvas({
     const next = regionForCluster(cluster);
     if (next) mapRef.current.animateToRegion(next, 350);
   }, [mapRef]);
-
-  const ridePositionsKey = useMemo(
-    () =>
-      ridesOnMap
-        .map((r) =>
-          r.driverCoords
-            ? `${r.id}:${r.driverCoords.latitude?.toFixed(4)},${r.driverCoords.longitude?.toFixed(4)}`
-            : r.id,
-        )
-        .join('|'),
-    [ridesOnMap],
-  );
 
   const lastCameraMoveRef = useRef(0);
   const CAMERA_MIN_INTERVAL_MS = 4000;
@@ -303,11 +295,11 @@ function MapCanvas({
     mapRef,
     fromPlace,
     toPlace,
-    passengerCoords?.latitude,
-    passengerCoords?.longitude,
-    reservedDriver?.latitude,
-    reservedDriver?.longitude,
-    ridePositionsKey,
+    passengerCoords,
+    originCoords,
+    destCoords,
+    reservedDriver,
+    ridesOnMap,
     isTrackingReserved,
   ]);
 
@@ -391,6 +383,95 @@ function MapCanvas({
     onClusterPress,
   ]);
 
+  const webMarkers = useMemo(() => {
+    if (!USE_WEB_GOOGLE_MAP) return [];
+    const items = [];
+    if (originCoords) {
+      items.push({
+        id: 'origin',
+        lat: originCoords.latitude,
+        lng: originCoords.longitude,
+        color: Theme.colors.success,
+        scale: 8,
+        title: fromPlace,
+        zIndex: 10,
+      });
+    }
+    if (destCoords) {
+      items.push({
+        id: 'dest',
+        lat: destCoords.latitude,
+        lng: destCoords.longitude,
+        color: Theme.colors.passenger,
+        scale: 8,
+        title: toPlace,
+        zIndex: 10,
+      });
+    }
+    if (passengerCoords) {
+      items.push({
+        id: 'you',
+        lat: passengerCoords.latitude,
+        lng: passengerCoords.longitude,
+        color: Theme.colors.passengerMap,
+        scale: 10,
+        label: 'You',
+        title: 'You',
+        zIndex: 200,
+      });
+    }
+    if (isTrackingReserved && reservedDriver?.latitude != null) {
+      items.push({
+        id: 'reserved',
+        lat: reservedDriver.latitude,
+        lng: reservedDriver.longitude,
+        color: Theme.colors.mateMap,
+        scale: 13,
+        title: reservedTrip?.plate ?? 'Your ride',
+        zIndex: 999,
+      });
+    }
+    for (const ride of ridesOnMap) {
+      if (isTrackingReserved && ride.mateId === reservedTrip?.mateId) continue;
+      if (!ride.driverCoords?.latitude) continue;
+      items.push({
+        id: String(ride.id),
+        lat: ride.driverCoords.latitude,
+        lng: ride.driverCoords.longitude,
+        color: selectedTripId === ride.id ? Theme.colors.passenger : Theme.colors.mateMap,
+        scale: selectedTripId === ride.id ? 12 : 9,
+        title: ride.plate ?? ride.mateName ?? 'Vehicle',
+        zIndex: selectedTripId === ride.id ? 100 : 50,
+        onPress: () => onSelectTrip(ride),
+      });
+    }
+    return items;
+  }, [
+    originCoords,
+    destCoords,
+    passengerCoords,
+    ridesOnMap,
+    isTrackingReserved,
+    reservedDriver,
+    reservedTrip,
+    selectedTripId,
+    fromPlace,
+    toPlace,
+    onSelectTrip,
+  ]);
+
+  if (USE_WEB_GOOGLE_MAP) {
+    return (
+      <InteractiveWebMap
+        ref={mapRef}
+        style={style ?? StyleSheet.absoluteFill}
+        initialRegion={initialRegion}
+        markers={webMarkers}
+        polyline={routeLine}
+      />
+    );
+  }
+
   return (
     <SafeMapView
       ref={mapRef}
@@ -403,12 +484,22 @@ function MapCanvas({
       onLayout={onLayout}
       onRegionChangeComplete={ANDROID_SAFE_MAP ? undefined : onRegionChange}>
       {routeLine.length === 2 ? (
-        <SafePolyline
-          coordinates={routeLine}
-          strokeColor={Theme.colors.passenger + '88'}
-          strokeWidth={3}
-          lineDashPattern={ANDROID_SAFE_MAP ? undefined : [8, 6]}
-        />
+        <>
+          <SafePolyline
+            coordinates={routeLine}
+            strokeColor={Theme.colors.passenger + 'CC'}
+            strokeWidth={4}
+            lineCap="round"
+            lineJoin="round"
+            zIndex={1}
+          />
+          <RouteDirectionArrow
+            from={routeFrom}
+            to={routeTo}
+            color={Theme.colors.passenger}
+            zIndex={6}
+          />
+        </>
       ) : null}
 
       {originCoords ? (
@@ -426,7 +517,7 @@ function MapCanvas({
             tracksViewChanges={false}
             title="You"
             zIndex={200}>
-            <StaticMapDot color="#2563EB" size={24} />
+            <StaticMapDot color={Theme.colors.passengerMap} size={24} />
           </SafeMarker>
         ) : (
           <SafeMarker
@@ -435,7 +526,7 @@ function MapCanvas({
             tracksViewChanges={false}
             zIndex={200}>
             <PulsingMapMarker
-              color="#2563EB"
+              color={Theme.colors.passengerMap}
               size={36}
               icon="person"
               label="YOU"
@@ -469,7 +560,7 @@ export default function LiveRouteMap({
   const mapRef = useRef(null);
   const fullscreenMapRef = useRef(null);
   const [expanded, setExpanded] = useState(false);
-  const [mapReady, setMapReady] = useState(!ANDROID_SAFE_MAP);
+  const [mapReady, setMapReady] = useState(!ANDROID_SAFE_MAP || USE_WEB_GOOGLE_MAP);
 
   useEffect(() => {
     if (!ANDROID_SAFE_MAP) return;
@@ -583,12 +674,12 @@ export default function LiveRouteMap({
             </View>
             <View style={styles.legendDivider} />
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: Theme.colors.passenger }]} />
+              <View style={[styles.legendDot, { backgroundColor: Theme.colors.mateMap }]} />
               <Text style={styles.legendText}>Trotro</Text>
             </View>
             <View style={styles.legendDivider} />
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#2563EB' }]} />
+              <View style={[styles.legendDot, { backgroundColor: Theme.colors.passengerMap }]} />
               <Text style={styles.legendText}>You</Text>
             </View>
           </View>
@@ -605,8 +696,17 @@ export default function LiveRouteMap({
           {isTrackingReserved && !reservedDriver ? (
             <View style={styles.emptyOverlay} pointerEvents="none">
               <View style={styles.emptyPill}>
-                <Ionicons name="locate-outline" size={14} color="#FBBF24" />
-                <Text style={styles.emptyText}>Locating your reserved ride…</Text>
+                <Ionicons name="locate-outline" size={14} color={Theme.colors.seatFilling} />
+                <Text style={styles.emptyText}>Waiting for driver GPS…</Text>
+              </View>
+            </View>
+          ) : null}
+
+          {isTrackingReserved && reservedDriver ? (
+            <View style={styles.trackingOverlay} pointerEvents="none">
+              <View style={styles.trackingPill}>
+                <View style={[styles.legendDot, { backgroundColor: Theme.colors.mateMap }]} />
+                <Text style={styles.trackingPillText}>Live · tracking your ride</Text>
               </View>
             </View>
           ) : null}
@@ -742,6 +842,25 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   emptyText: { color: Theme.colors.textSub, fontSize: 12, fontWeight: '600' },
+  trackingOverlay: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
+    alignItems: 'center',
+  },
+  trackingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(33,150,243,0.35)',
+  },
+  trackingPillText: { color: Theme.colors.text, fontSize: 11, fontWeight: '800' },
   mapHint: {
     color: Theme.colors.textMuted,
     fontSize: 11,
@@ -799,10 +918,10 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   calloutLabel: { color: Theme.colors.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  calloutRoute: { color: '#F9FAFB', fontSize: 14, fontWeight: '800' },
-  calloutMeta: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
+  calloutRoute: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+  calloutMeta: { color: '#E0E0E0', fontSize: 12, fontWeight: '600' },
   calloutPlate: {
-    color: '#F9FAFB',
+    color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 1,
@@ -812,7 +931,7 @@ const styles = StyleSheet.create({
   calloutSeats: { color: Theme.colors.success, fontSize: 12, fontWeight: '700', marginTop: 4 },
   yourRideBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(249,115,22,0.18)',
+    backgroundColor: 'rgba(243,111,33,0.18)',
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -820,7 +939,7 @@ const styles = StyleSheet.create({
   },
   yourRideBadgeText: { color: Theme.colors.mate, fontSize: 10, fontWeight: '800' },
 
-  fullscreen: { flex: 1, backgroundColor: '#0C0C0C' },
+  fullscreen: { flex: 1, backgroundColor: '#121212' },
   fullscreenHeader: {
     flexDirection: 'row',
     alignItems: 'center',

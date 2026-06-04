@@ -35,7 +35,7 @@ export async function saveCustomRoute({ origin, destination, fareGhs }) {
     id,
     origin: trimmedOrigin,
     destination: trimmedDestination,
-    fareGhs: fare ?? 4,
+    fareGhs: fare,
     isCustom: true,
     savedAt: new Date().toISOString(),
   };

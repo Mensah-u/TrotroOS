@@ -57,7 +57,7 @@ export default function MateScreen({ navigation }) {
   }, [navigation]);
 
   if (loading) {
-    return <BrandedLoader message="Loading dashboard" />;
+    return <BrandedLoader message="Loading dashboard" variant="mate" />;
   }
 
   return (

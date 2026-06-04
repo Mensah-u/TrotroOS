@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import LivePulse from '@/components/LivePulse';
 import SafeMapView, { canUseNativeMap, SafeCallout, SafeMarker, SafePolyline } from '@/components/SafeMapView';
+import RouteDirectionArrow from '@/components/RouteDirectionArrow';
 import PulsingMapMarker from '@/components/PulsingMapMarker';
 import MapClusterMarker from '@/components/MapClusterMarker';
 import useViewportClusters from '@/hooks/useViewportClusters';
@@ -25,14 +26,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   DEFAULT_MAP_REGION,
-  findRouteById,
   findRouteIdByLabel,
   formatRoute,
   getAllPlaces,
   getPlaceCoords,
-  getRouteFare,
   routes,
 } from '@/constants/routes';
+import PremiumBackground from '@/components/PremiumBackground';
+import { boardReservation, fetchUpcomingScheduledDemand } from '@/services/featuresV14';
 import { getMateEarningsTotal, recordTripEarnings } from '@/services/mateEarnings';
 import {
   getCustomRoutes,
@@ -43,19 +44,35 @@ import {
   createTrip,
   deleteDriverLocation,
   endTrip as endTripDb,
-  fetchActiveReservationsForTrip,
+  fetchMateTripReservations,
   fetchPassengerLocations,
   fetchTripById,
   getActiveMateTrip,
+  isMateAuthError,
   subscribeToPassengerLocations,
   subscribeToReservations,
   subscribeToTripById,
   updateTripDestination,
+  updateTripFare,
   updateTripSeats,
   upsertDriverLocation,
   supabase,
 } from '@/services/supabase';
-import { TAB_BAR_CLEARANCE, TAB_FOOTER_CLEARANCE } from '@/constants/layout';
+import MateMoMoEmailModal from '@/components/mate/MateMoMoEmailModal';
+import { PAYMENTS_ENABLED } from '@/constants/config';
+import { sendMateRideRequest, subscribeToTripRideRequests } from '@/services/rideRequests';
+import { MateInvitePaymentError, payForMateInvite } from '@/services/mateInvitePayment';
+import { sendPushToUser } from '@/services/pushNotifications';
+import { getMatePaymentEmail, isValidMatePaymentEmail, saveMatePaymentEmail } from '@/services/matePaymentEmail';
+import { estimateMateInviteFee } from '@/utils/paymentMath';
+import { TAB_FOOTER_CLEARANCE } from '@/constants/layout';
+import {
+  DEFAULT_VEHICLE_TYPE,
+  clampMatePassengerSeats,
+  getMatePassengerSeatLimits,
+} from '@/constants/vehicleTypes';
+import { getSeatStatus, Theme, darkMapStyle, C } from '@/constants/theme';
+import { hapticMedium, hapticSuccess } from '@/utils/haptics';
 import { formatSupabaseError } from '@/utils/supabaseErrors';
 import { getMyLocationLabel } from '@/utils/myLocation';
 import {
@@ -65,49 +82,25 @@ import {
   totalDemandCount,
 } from '@/utils/passengerDemand';
 import { passengerMatchesRoute } from '@/utils/routeMatching';
-
-const C = {
-  BG:          '#0C0C0C',
-  SURFACE:     '#161616',
-  SURFACE_UP:  '#1E1E1E',
-  BORDER:      'rgba(255,255,255,0.07)',
-  ACCENT:      '#F97316',
-  ACCENT_SOFT: 'rgba(249,115,22,0.14)',
-  SUCCESS:     '#22C55E',
-  WARN:        '#EAB308',
-  DANGER:      '#EF4444',
-  TEXT:        '#F9FAFB',
-  TEXT_SUB:    '#9CA3AF',
-  TEXT_MUTED:  '#4B5563',
-};
+import {
+  buildRouteFromTripRow,
+  formatMateRouteFare,
+  resolveMateRouteFare,
+} from '@/utils/mateRoute';
 
 const MAP_INITIAL_REGION = DEFAULT_MAP_REGION;
 
-const darkMapStyle = [
-  { elementType: 'geometry',           stylers: [{ color: '#0c0c0c' }] },
-  { elementType: 'labels.text.fill',   stylers: [{ color: '#6b7280' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0c0c0c' }] },
-  { featureType: 'administrative',     elementType: 'geometry.stroke', stylers: [{ color: '#1e1e1e' }] },
-  { featureType: 'poi',                elementType: 'labels',          stylers: [{ visibility: 'off' }] },
-  { featureType: 'road',               elementType: 'geometry',        stylers: [{ color: '#1e1e1e' }] },
-  { featureType: 'road.highway',       elementType: 'geometry',        stylers: [{ color: '#2a2a2a' }] },
-  { featureType: 'transit',            elementType: 'labels',          stylers: [{ visibility: 'off' }] },
-  { featureType: 'water',              elementType: 'geometry',        stylers: [{ color: '#060606' }] },
-];
-
-const MIN_SEATS = 1;
-const MAX_SEATS = 20;
-const DEFAULT_SEATS = 10;
-
 function getSeatColor(seats) {
-  if (seats < 2) return C.DANGER;
-  if (seats <= 5) return C.WARN;
-  return C.SUCCESS;
+  return getSeatStatus(seats).color;
 }
 
 function filterPassengersForRoute(passengers, routeLabel) {
   if (!routeLabel) return passengers;
   return passengers.filter((p) => passengerMatchesRoute(p, routeLabel));
+}
+
+function filterWaitingPassengersForRoute(passengers, routeLabel) {
+  return filterPassengersForRoute(passengers, routeLabel).filter((p) => !p.reservation_id);
 }
 
 function formatGhs(amount) {
@@ -116,20 +109,14 @@ function formatGhs(amount) {
 
 const LIVE_POLL_MS = 5000;
 
-function applyTripRowFromDb(current, row) {
+function applyTripRowFromDb(current, row, customRoutes = []) {
   if (!current || current.tripId !== row.id) return current;
-  const nextRoute = current.route
-    ? {
-        ...current.route,
-        origin: row.origin ?? current.route.origin,
-        destination: row.destination ?? current.route.destination,
-      }
-    : current.route;
+  const route = buildRouteFromTripRow(row, customRoutes) ?? current.route;
   return {
     ...current,
     seatsLeft: row.available_seats ?? current.seatsLeft,
     totalSeats: row.total_seats ?? current.totalSeats,
-    route: nextRoute,
+    route,
   };
 }
 
@@ -142,6 +129,123 @@ function formatElapsed(ms) {
     return `${h}h ${m % 60}m`;
   }
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatReservationCountdown(expiresAt) {
+  if (!expiresAt) return '';
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return 'Expired';
+  const mins = Math.ceil(ms / 60000);
+  return mins <= 1 ? '<1 min left' : `${mins} min left`;
+}
+
+function WaitingPassengersPanel({
+  passengers,
+  onSendRequest,
+  pendingIds,
+  sendingId,
+  seatsLeft,
+  inviteFeeLabel,
+  paymentsEnabled,
+}) {
+  if (!passengers?.length) return null;
+  const canSend = seatsLeft > 0;
+
+  return (
+    <View style={styles.waitingPanel}>
+      <View style={styles.waitingPanelHeader}>
+        <Ionicons name="person-outline" size={16} color={C.PASSENGER_MAP} />
+        <Text style={styles.waitingPanelTitle}>
+          {passengers.length} waiting your way — send a seat invite
+        </Text>
+      </View>
+      {paymentsEnabled && inviteFeeLabel ? (
+        <Text style={styles.inviteFeeHint}>
+          Each invite: {inviteFeeLabel} (8% platform + GHS 1 request fee via MoMo)
+        </Text>
+      ) : null}
+      <ScrollView
+        style={styles.waitingPanelScroll}
+        contentContainerStyle={styles.waitingPanelScrollContent}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={false}>
+        {passengers.map((p) => {
+          const pid = p.passenger_id;
+          const sent = pendingIds?.has?.(pid);
+          const sending = sendingId === pid;
+          return (
+            <View key={pid} style={styles.waitingRow}>
+              <Ionicons name="navigate-outline" size={15} color={C.PASSENGER_MAP} />
+              <View style={styles.waitingRowBody}>
+                <Text style={styles.waitingRowText} numberOfLines={1}>
+                  Passenger {pid?.slice(0, 8) ?? 'nearby'}
+                </Text>
+                <Text style={styles.waitingRowSub} numberOfLines={1}>
+                  {p.queued_route ?? 'Same direction'}
+                </Text>
+              </View>
+              <Pressable
+                disabled={!canSend || sent || sending}
+                onPress={() => onSendRequest?.(p)}
+                style={({ pressed }) => [
+                  styles.waitingSendBtn,
+                  (!canSend || sent) && styles.waitingSendBtnMuted,
+                  pressed && canSend && !sent && { opacity: 0.85 },
+                ]}>
+                <Text style={styles.waitingSendBtnText}>
+                  {sending
+                    ? 'Paying…'
+                    : sent
+                      ? 'Sent'
+                      : paymentsEnabled && inviteFeeLabel
+                        ? `Pay ${inviteFeeLabel}`
+                        : 'Send request'}
+                </Text>
+              </Pressable>
+            </View>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+function ReservationsPanel({ reservations, onBoard }) {
+  if (!reservations?.length) return null;
+
+  return (
+    <View style={styles.reservationPanel}>
+      <View style={styles.reservationPanelHeader}>
+        <Ionicons name="bookmark" size={16} color={C.ACCENT} />
+        <Text style={styles.reservationPanelTitle}>
+          {reservations.length} reserved — tap to board
+        </Text>
+      </View>
+      <ScrollView
+        style={styles.reservationPanelScroll}
+        contentContainerStyle={styles.reservationPanelScrollContent}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={false}>
+        {reservations.map((r) => (
+          <Pressable
+            key={r.id}
+            onPress={() => onBoard?.(r.id)}
+            style={({ pressed }) => [styles.reservationRow, pressed && { opacity: 0.85 }]}>
+            <Ionicons name="ticket-outline" size={15} color={C.ACCENT} />
+            <View style={styles.reservationRowBody}>
+              <Text style={styles.reservationRowText} numberOfLines={1}>
+                Passenger {r.passenger_id?.slice(0, 8) ?? 'reserved'}
+              </Text>
+              <Text style={styles.reservationRowSub}>
+                {formatReservationCountdown(r.expires_at)}
+              </Text>
+            </View>
+            <Text style={styles.reservationBoardBtn}>Board</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    </View>
+  );
 }
 
 // ─── Reservation banner ──────────────────────────────────────────────────────
@@ -168,13 +272,47 @@ function ReservationBanner({ visible }) {
   return (
     <Animated.View style={[styles.banner, { opacity, transform: [{ translateY }] }]} pointerEvents="none">
       <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
-      <Text style={styles.bannerText}>New seat reserved!</Text>
+      <Text style={styles.bannerText}>New reservation received</Text>
     </Animated.View>
   );
 }
 
 // ─── Sub-views ───────────────────────────────────────────────────────────────
-function IdleView({ onStart, onStartWithDestination, onOpenEarn, demand, earningsTotal, lastSyncAt, defaultRouteLabel }) {
+function ScheduledCommutesPanel({ items }) {
+  if (!items?.length) return null;
+
+  return (
+    <View style={styles.demandPanel}>
+      <View style={styles.demandHeader}>
+        <View style={styles.demandHeaderLeft}>
+          <Ionicons name="calendar-outline" size={16} color={C.ACCENT} />
+          <Text style={styles.demandHeaderText}>Scheduled commutes</Text>
+        </View>
+        <View style={styles.demandHeaderBadge}>
+          <Text style={styles.demandHeaderBadgeText}>{items.length} upcoming</Text>
+        </View>
+      </View>
+      <View style={styles.demandList}>
+        {items.slice(0, 4).map((item) => (
+          <View key={item.id} style={styles.demandRow}>
+            <Text style={styles.demandRoute} numberOfLines={1}>{item.route_label}</Text>
+            <Text style={styles.demandCountText}>
+              {item.pickup_stop ? `${item.pickup_stop} · ` : ''}
+              {new Date(item.scheduled_at).toLocaleString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function IdleView({ onStart, onStartWithDestination, onOpenEarn, demand, scheduledDemand, earningsTotal, lastSyncAt, defaultRouteLabel }) {
   const [, setUiTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setUiTick((n) => n + 1), 1000);
@@ -299,6 +437,8 @@ function IdleView({ onStart, onStartWithDestination, onOpenEarn, demand, earning
           ))}
         </View>
       )}
+
+      <ScheduledCommutesPanel items={scheduledDemand} />
 
       <Pressable
         accessibilityRole="button"
@@ -433,7 +573,7 @@ function CustomRouteEditor({ onSave, onCancel, mateCoords }) {
       <TextInput
         value={fare}
         onChangeText={(v) => setFare(v.replace(/[^0-9.]/g, ''))}
-        placeholder="Defaults to 4"
+        placeholder="Leave blank if fare on board"
         placeholderTextColor={C.TEXT_MUTED}
         style={styles.customInput}
         keyboardType="decimal-pad"
@@ -473,9 +613,13 @@ function CustomRouteEditor({ onSave, onCancel, mateCoords }) {
   );
 }
 
-function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSyncAt, startWithCustomEditor = false, mateCoords = null }) {
+function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, scheduledDemand = [], lastSyncAt, startWithCustomEditor = false, mateCoords = null, vehicleType = DEFAULT_VEHICLE_TYPE }) {
+  const seatLimits = useMemo(
+    () => getMatePassengerSeatLimits(vehicleType ?? DEFAULT_VEHICLE_TYPE),
+    [vehicleType],
+  );
   const [selectedRouteId, setSelectedRouteId] = useState(defaultRouteId ?? null);
-  const [seats, setSeats] = useState(DEFAULT_SEATS);
+  const [seats, setSeats] = useState(() => clampMatePassengerSeats(seatLimits.default, vehicleType));
   const [customRoutes, setCustomRoutes] = useState([]);
   const [editingCustom, setEditingCustom] = useState(!!startWithCustomEditor);
 
@@ -483,9 +627,14 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
   const allRoutes = [...customRoutes, ...builtins];
   const selectedRoute = allRoutes.find((r) => r.id === selectedRouteId) ?? null;
   const canDepart = selectedRoute !== null && !loading;
-  const estFare = selectedRoute ? getRouteFare(selectedRoute) * seats : 0;
+  const unitFare = selectedRoute ? resolveMateRouteFare(selectedRoute) : null;
+  const estFare = unitFare != null ? unitFare * seats : null;
   const selectedLabel = selectedRoute ? formatRoute(selectedRoute) : null;
   const waitingOnRoute = selectedLabel ? (demand?.[selectedLabel] ?? 0) : 0;
+  const scheduledOnRoute = useMemo(() => {
+    if (!selectedLabel) return 0;
+    return (scheduledDemand ?? []).filter((item) => item.route_label === selectedLabel).length;
+  }, [selectedLabel, scheduledDemand]);
   const syncSecs = lastSyncAt != null ? Math.max(0, Math.floor((Date.now() - lastSyncAt) / 1000)) : null;
   const [, setUiTick] = useState(0);
 
@@ -497,6 +646,10 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
   useEffect(() => {
     getCustomRoutes().then(setCustomRoutes).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setSeats((current) => clampMatePassengerSeats(current || seatLimits.default, vehicleType));
+  }, [vehicleType, seatLimits.default]);
 
   useEffect(() => {
     if (defaultRouteId != null && selectedRouteId == null) setSelectedRouteId(defaultRouteId);
@@ -551,7 +704,7 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
               </View>
             ) : null}
           </View>
-          <Text style={styles.routeFareTag}>GHS {getRouteFare(route)}/passenger</Text>
+          <Text style={styles.routeFareTag}>{formatMateRouteFare(route)}/passenger</Text>
         </View>
         {custom ? (
           <Pressable
@@ -618,12 +771,13 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
       </View>
 
       <Text style={styles.sectionLabel}>PASSENGER SEATS</Text>
+      <Text style={styles.stepperSubLabel}>{vehicleType} · set your capacity (1–{seatLimits.max})</Text>
       <View style={styles.stepperCard}>
         <Pressable
           accessibilityRole="button"
-          disabled={seats <= MIN_SEATS || loading}
-          onPress={() => setSeats((s) => Math.max(MIN_SEATS, s - 1))}
-          style={({ pressed }) => [styles.stepperBtn, (seats <= MIN_SEATS || loading) && styles.stepperBtnDisabled, pressed && { opacity: 0.7 }]}>
+          disabled={seats <= seatLimits.min || loading}
+          onPress={() => setSeats((s) => clampMatePassengerSeats(s - 1, vehicleType))}
+          style={({ pressed }) => [styles.stepperBtn, (seats <= seatLimits.min || loading) && styles.stepperBtnDisabled, pressed && { opacity: 0.7 }]}>
           <Ionicons name="remove" size={24} color={C.TEXT} />
         </Pressable>
         <View style={styles.stepperCenter}>
@@ -632,9 +786,9 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
         </View>
         <Pressable
           accessibilityRole="button"
-          disabled={seats >= MAX_SEATS || loading}
-          onPress={() => setSeats((s) => Math.min(MAX_SEATS, s + 1))}
-          style={({ pressed }) => [styles.stepperBtn, (seats >= MAX_SEATS || loading) && styles.stepperBtnDisabled, pressed && { opacity: 0.7 }]}>
+          disabled={seats >= seatLimits.max || loading}
+          onPress={() => setSeats((s) => clampMatePassengerSeats(s + 1, vehicleType))}
+          style={({ pressed }) => [styles.stepperBtn, (seats >= seatLimits.max || loading) && styles.stepperBtnDisabled, pressed && { opacity: 0.7 }]}>
           <Ionicons name="add" size={24} color={C.TEXT} />
         </Pressable>
       </View>
@@ -647,6 +801,9 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
               {waitingOnRoute > 0
                 ? `${waitingOnRoute} passenger${waitingOnRoute === 1 ? '' : 's'} waiting on this route`
                 : 'No passengers in queue on this route yet'}
+              {scheduledOnRoute > 0
+                ? ` · ${scheduledOnRoute} scheduled commute${scheduledOnRoute === 1 ? '' : 's'}`
+                : ''}
             </Text>
             {syncSecs != null ? (
               <Text style={styles.routeDemandSync}>· live {syncSecs}s ago</Text>
@@ -655,7 +812,8 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
           <View style={styles.estEarningsRow}>
             <Ionicons name="cash-outline" size={16} color={C.SUCCESS} />
             <Text style={styles.estEarningsText}>
-              Full trip potential: {formatGhs(estFare)}
+              Full trip potential:{' '}
+              {estFare != null ? formatGhs(estFare) : 'Set fare or collect on board'}
             </Text>
           </View>
         </>
@@ -701,19 +859,25 @@ function SetupView({ onDepart, onCancel, defaultRouteId, loading, demand, lastSy
 function ActiveView({
   trip,
   onOnboard,
+  onBoardReservation,
   onTripFull,
   onEndTrip,
   onOpenEarn,
   onUpdateDestination,
   reservationBannerKey,
   reservationCount,
+  tripReservations,
   mateCoords,
   passengerLocations,
   lastSyncAt,
+  onSendRideRequest,
+  pendingRequestPassengerIds,
+  sendingRequestPassengerId,
+  inviteFeeLabel,
+  paymentsEnabled,
 }) {
   const isFull = trip.seatsLeft === 0;
   const seatColor = getSeatColor(trip.seatsLeft);
-  const [showMap, setShowMap] = useState(true);
   const [elapsed, setElapsed] = useState('0:00');
   const [editingDest, setEditingDest] = useState(false);
   const [editFrom, setEditFrom] = useState(trip.route?.origin ?? '');
@@ -744,7 +908,12 @@ function ActiveView({
   const mapRef = useRef(null);
   const routeLabel = formatRoute(trip.route);
   const routePassengers = filterPassengersForRoute(passengerLocations, routeLabel);
-  const tripEarnings = trip.passengersOnboarded * getRouteFare(trip.route);
+  const waitingPassengers = useMemo(
+    () => filterWaitingPassengersForRoute(passengerLocations, routeLabel),
+    [passengerLocations, routeLabel],
+  );
+  const unitFare = resolveMateRouteFare(trip.route);
+  const tripEarnings = unitFare != null ? trip.passengersOnboarded * unitFare : null;
   const gpsLive = trip.locationStatus === 'active' && !!mateCoords;
   const [, setUiTick] = useState(0);
 
@@ -793,7 +962,13 @@ function ActiveView({
   };
   const originCoords    = getPlaceCoords(trip.route?.origin);
   const destCoords      = getPlaceCoords(trip.route?.destination);
-  const tripRoutePoints = [originCoords, mateCoords, destCoords].filter(Boolean);
+  const tripRoutePoints = useMemo(
+    () => [originCoords, mateCoords, destCoords].filter(Boolean),
+    [originCoords, mateCoords, destCoords],
+  );
+
+  const routeDirectionFrom = mateCoords ?? originCoords;
+  const routeDirectionTo = destCoords;
 
   const mapRegion = mateCoords
     ? { ...mateCoords, latitudeDelta: 0.025, longitudeDelta: 0.025 }
@@ -832,22 +1007,22 @@ function ActiveView({
   }, []);
 
   useEffect(() => {
-    if (!canUseNativeMap() || !showMap || !mapRef.current || !mateCoords) return;
+    if (!canUseNativeMap() || !mapRef.current || !mateCoords) return;
     mapRef.current.animateToRegion(
       { ...mateCoords, latitudeDelta: 0.02, longitudeDelta: 0.02 },
       450,
     );
-  }, [mateCoords?.latitude, mateCoords?.longitude, showMap]);
+  }, [mateCoords]);
 
   useEffect(() => {
-    if (!canUseNativeMap() || !showMap || !mapRef.current) return;
+    if (!canUseNativeMap() || !mapRef.current) return;
     if (tripRoutePoints.length >= 2) {
       mapRef.current.fitToCoordinates(tripRoutePoints, {
         edgePadding: { top: 80, right: 60, bottom: 120, left: 60 },
         animated: true,
       });
     }
-  }, [showMap, trip.route?.origin, trip.route?.destination]);
+  }, [tripRoutePoints]);
 
   return (
     <View style={styles.activeContainer}>
@@ -945,11 +1120,13 @@ function ActiveView({
         <View style={styles.liveStatsRow}>
           <View style={styles.liveStatPill}>
             <LivePulse color="#FBBF24" size={6} />
-            <Text style={styles.liveStatText}>{routePassengers.length} waiting</Text>
+            <Text style={styles.liveStatText}>{waitingPassengers.length} waiting</Text>
           </View>
-          <View style={styles.liveStatPill}>
-            <LivePulse color={C.ACCENT} size={6} />
-            <Text style={styles.liveStatText}>{reservationCount} reserved</Text>
+          <View style={[styles.liveStatPill, reservationCount > 0 && styles.liveStatPillReserved]}>
+            <LivePulse color={reservationCount > 0 ? C.ACCENT : C.ACCENT} size={6} />
+            <Text style={[styles.liveStatText, reservationCount > 0 && styles.liveStatTextReserved]}>
+              {reservationCount} reserved
+            </Text>
           </View>
           <View style={styles.liveStatPill}>
             <Ionicons name="time-outline" size={13} color={C.TEXT_SUB} />
@@ -957,7 +1134,9 @@ function ActiveView({
           </View>
           <Pressable onPress={onOpenEarn} style={styles.liveStatPill}>
             <Ionicons name="wallet-outline" size={13} color={C.SUCCESS} />
-            <Text style={[styles.liveStatText, { color: C.SUCCESS }]}>{formatGhs(tripEarnings)}</Text>
+            <Text style={[styles.liveStatText, { color: C.SUCCESS }]}>
+              {tripEarnings != null ? formatGhs(tripEarnings) : 'Fare on board'}
+            </Text>
           </Pressable>
         </View>
 
@@ -977,31 +1156,68 @@ function ActiveView({
               </Text>
             ) : null}
           </View>
+        </View>
+      </View>
+
+      <ReservationsPanel reservations={tripReservations} onBoard={onBoardReservation} />
+
+      <WaitingPassengersPanel
+        passengers={waitingPassengers}
+        onSendRequest={onSendRideRequest}
+        pendingIds={pendingRequestPassengerIds}
+        sendingId={sendingRequestPassengerId}
+        seatsLeft={trip.seatsLeft}
+        inviteFeeLabel={inviteFeeLabel}
+        paymentsEnabled={paymentsEnabled}
+      />
+
+      <View style={styles.activeControlsSection}>
+        <Pressable
+          accessibilityRole="button"
+          disabled={isFull}
+          onPress={onOnboard}
+          style={({ pressed }) => [styles.onboardButton, isFull && styles.onboardButtonFull, pressed && !isFull && { opacity: 0.88 }]}>
+          <View style={styles.onboardButtonInner}>
+            {isFull ? (
+              <Ionicons name="ban-outline" size={28} color="rgba(255,255,255,0.5)" />
+            ) : (
+              <Ionicons name="person-add" size={28} color="#FFFFFF" />
+            )}
+            <Text style={styles.onboardButtonText}>{isFull ? 'TRIP FULL' : '+1 WALK-UP'}</Text>
+            {!isFull ? <Text style={styles.onboardButtonSub}>passenger without reservation</Text> : null}
+          </View>
+        </Pressable>
+
+        <View style={styles.activeSecondaryRow}>
           <Pressable
-            onPress={() => setShowMap((s) => !s)}
-            style={({ pressed }) => [styles.mapToggle, showMap && styles.mapToggleOn, pressed && { opacity: 0.8 }]}>
-            <Ionicons name={showMap ? 'grid-outline' : 'map-outline'} size={15} color={showMap ? C.ACCENT : C.TEXT_SUB} />
-            <Text style={[styles.mapToggleText, showMap && { color: C.ACCENT }]}>
-              {showMap ? 'Controls' : 'Live Map'}
-            </Text>
+            disabled={isFull}
+            onPress={onTripFull}
+            style={({ pressed }) => [styles.fullButton, isFull && { opacity: 0.4 }, pressed && { opacity: 0.75 }]}>
+            <Ionicons name="close-circle-outline" size={18} color={C.ACCENT} />
+            <Text style={styles.fullButtonText}>Mark Full</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={onEndTrip}
+            style={({ pressed }) => [styles.endButton, pressed && { opacity: 0.75 }]}>
+            <Ionicons name="flag-outline" size={18} color={C.TEXT_MUTED} />
+            <Text style={styles.endButtonText}>End Trip</Text>
           </Pressable>
         </View>
       </View>
 
-      {/* Map or big buttons */}
-      {showMap ? (
-        <View style={styles.mateMapWrapper}>
-          <SafeMapView
-            ref={mapRef}
-            style={StyleSheet.absoluteFill}
-            initialRegion={mapRegion}
-            customMapStyle={darkMapStyle}
-            showsCompass={false}
-            showsUserLocation={false}
-            followsUserLocation={false}
-            onLayout={onMapLayout}
-            onRegionChangeComplete={onMapRegionChange}
-            fallbackMessage="Live map needs a Google Maps key in release builds. Controls below still work.">
+      <View style={styles.mateMapWrapper}>
+        <SafeMapView
+          ref={mapRef}
+          style={StyleSheet.absoluteFill}
+          initialRegion={mapRegion}
+          customMapStyle={darkMapStyle}
+          showsCompass={false}
+          showsUserLocation={false}
+          followsUserLocation={false}
+          onLayout={onMapLayout}
+          onRegionChangeComplete={onMapRegionChange}
+          fallbackMessage="Live map needs a Google Maps key in release builds. Controls above still work.">
             {originCoords ? (
               <SafeMarker
                 coordinate={originCoords}
@@ -1053,14 +1269,24 @@ function ActiveView({
               </SafeMarker>
             ) : null}
             {tripRoutePoints.length >= 2 ? (
-              <SafePolyline
-                coordinates={tripRoutePoints}
-                strokeColor={C.ACCENT}
-                strokeWidth={4}
-                lineDashPattern={[6, 6]}
-                lineCap="round"
-                zIndex={1}
-              />
+              <>
+                <SafePolyline
+                  coordinates={tripRoutePoints}
+                  strokeColor={C.ACCENT + 'CC'}
+                  strokeWidth={4}
+                  lineCap="round"
+                  lineJoin="round"
+                  zIndex={1}
+                />
+                {routeDirectionFrom && routeDirectionTo ? (
+                  <RouteDirectionArrow
+                    from={routeDirectionFrom}
+                    to={routeDirectionTo}
+                    color={C.ACCENT}
+                    zIndex={5}
+                  />
+                ) : null}
+              </>
             ) : null}
             {mateCoords ? (
               <SafeMarker
@@ -1069,7 +1295,7 @@ function ActiveView({
                 tracksViewChanges
                 zIndex={2}>
                 <PulsingMapMarker
-                  color="#2563EB"
+                  color={C.MATE_MAP}
                   size={44}
                   icon="bus"
                   label="YOU · LIVE"
@@ -1089,7 +1315,7 @@ function ActiveView({
                     onPress={() => onPassengerClusterPress(c)}>
                     <MapClusterMarker
                       count={c.count}
-                      color={reservedCount > 0 ? C.ACCENT : C.SUCCESS}
+                      color={reservedCount > 0 ? C.ACCENT : C.PASSENGER_MAP}
                     />
                   </SafeMarker>
                 );
@@ -1103,7 +1329,7 @@ function ActiveView({
                   anchor={{ x: 0.5, y: 0.5 }}
                   tracksViewChanges>
                   <PulsingMapMarker
-                    color={p.reservation_id ? C.ACCENT : C.SUCCESS}
+                    color={p.reservation_id ? C.ACCENT : C.PASSENGER_MAP}
                     size={32}
                     icon={p.reservation_id ? 'bookmark' : 'person'}
                     ringOpacity={p.reservation_id ? 0.55 : 0.4}
@@ -1113,13 +1339,37 @@ function ActiveView({
                     <View style={styles.calloutCard}>
                       <Text style={styles.calloutTitle}>{p.reservation_id ? 'Reserved passenger' : 'Waiting passenger'}</Text>
                       <Text style={styles.calloutSub}>{p.queued_route ?? routeLabel}</Text>
+                      {!p.reservation_id && trip.seatsLeft > 0 ? (
+                        <Pressable
+                          onPress={() => onSendRideRequest?.(p)}
+                          disabled={
+                            sendingRequestPassengerId === p.passenger_id
+                            || pendingRequestPassengerIds?.has?.(p.passenger_id)
+                          }
+                          style={({ pressed }) => [
+                            styles.calloutRequestBtn,
+                            pressed && { opacity: 0.85 },
+                            (pendingRequestPassengerIds?.has?.(p.passenger_id)
+                              || sendingRequestPassengerId === p.passenger_id) && styles.calloutRequestBtnSent,
+                          ]}>
+                          <Text style={styles.calloutRequestBtnText}>
+                            {sendingRequestPassengerId === p.passenger_id
+                              ? 'Paying…'
+                              : pendingRequestPassengerIds?.has?.(p.passenger_id)
+                                ? 'Request sent'
+                                : paymentsEnabled && inviteFeeLabel
+                                  ? `Pay ${inviteFeeLabel}`
+                                  : 'Send seat request'}
+                          </Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                   </SafeCallout>
                 </SafeMarker>
               );
             })}
           </SafeMapView>
-          {routePassengers.length === 0 ? (
+          {waitingPassengers.length === 0 ? (
             <View style={styles.mapEmptyOverlay} pointerEvents="none">
               <View style={styles.mapEmptyPill}>
                 <Ionicons name="person-outline" size={13} color={C.TEXT_SUB} />
@@ -1130,63 +1380,25 @@ function ActiveView({
 
           <View style={styles.mapLegend} pointerEvents="none">
             <View style={styles.mapLegendRow}>
-              <View style={[styles.mapLegendDot, { backgroundColor: '#22C55E' }]} />
+              <View style={[styles.mapLegendDot, { backgroundColor: C.SUCCESS }]} />
               <Text style={styles.mapLegendText} numberOfLines={1}>
                 {trip.route?.origin ?? 'Pickup'}
               </Text>
             </View>
             <View style={styles.mapLegendRow}>
-              <View style={[styles.mapLegendDot, { backgroundColor: '#2563EB' }]} />
+              <View style={[styles.mapLegendDot, { backgroundColor: C.MATE_MAP }]} />
               <Text style={styles.mapLegendText}>You</Text>
             </View>
             <View style={styles.mapLegendRow}>
               <View style={[styles.mapLegendDot, { backgroundColor: C.ACCENT }]} />
-              <Text style={styles.mapLegendText} numberOfLines={1}>
-                {trip.route?.destination ?? 'Destination'}
-              </Text>
+              <Text style={styles.mapLegendText}>Reserved seat</Text>
+            </View>
+            <View style={styles.mapLegendRow}>
+              <View style={[styles.mapLegendDot, { backgroundColor: C.PASSENGER_MAP }]} />
+              <Text style={styles.mapLegendText}>Waiting</Text>
             </View>
           </View>
         </View>
-      ) : (
-        <View style={styles.activeBody}>
-          <Pressable
-            accessibilityRole="button"
-            disabled={isFull}
-            onPress={onOnboard}
-            style={({ pressed }) => [styles.onboardButton, isFull && styles.onboardButtonFull, pressed && !isFull && { opacity: 0.88 }]}>
-            <View style={styles.onboardButtonInner}>
-              {isFull ? (
-                <Ionicons name="ban-outline" size={32} color="rgba(255,255,255,0.5)" />
-              ) : (
-                <Ionicons name="person-add" size={32} color="#FFFFFF" />
-              )}
-              <Text style={styles.onboardButtonText}>{isFull ? 'TRIP FULL' : '+1 ONBOARDED'}</Text>
-              {!isFull ? <Text style={styles.onboardButtonSub}>tap when passenger boards</Text> : null}
-            </View>
-          </Pressable>
-        </View>
-      )}
-
-      {!showMap ? (
-        <View style={styles.activeFooter}>
-          <View style={styles.activeSecondaryRow}>
-            <Pressable
-              disabled={isFull}
-              onPress={onTripFull}
-              style={({ pressed }) => [styles.fullButton, isFull && { opacity: 0.4 }, pressed && { opacity: 0.75 }]}>
-              <Ionicons name="close-circle-outline" size={18} color={C.ACCENT} />
-              <Text style={styles.fullButtonText}>Mark Full</Text>
-            </Pressable>
-
-            <Pressable
-              onPress={onEndTrip}
-              style={({ pressed }) => [styles.endButton, pressed && { opacity: 0.75 }]}>
-              <Ionicons name="flag-outline" size={18} color={C.TEXT_MUTED} />
-              <Text style={styles.endButtonText}>End Trip</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -1199,6 +1411,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
   const [departLoading, setDepartLoading] = useState(false);
   const [reservationBannerKey, setReservationBannerKey] = useState(0);
   const [reservationCount, setReservationCount] = useState(0);
+  const [tripReservations, setTripReservations] = useState([]);
   const [mateCoords, setMateCoords] = useState(null);
   const mateCoordsRef = useRef(null);
   useEffect(() => { mateCoordsRef.current = mateCoords; }, [mateCoords]);
@@ -1206,12 +1419,18 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
   const [idleDemand, setIdleDemand] = useState({});
   const [earningsTotal, setEarningsTotal] = useState(0);
   const [lastSyncAt, setLastSyncAt] = useState(null);
+  const [pendingRequestPassengerIds, setPendingRequestPassengerIds] = useState(() => new Set());
+  const [sendingRequestPassengerId, setSendingRequestPassengerId] = useState(null);
+  const [scheduledDemand, setScheduledDemand] = useState([]);
+  const [momoEmailModal, setMomoEmailModal] = useState(null);
+  const pendingInviteRef = useRef(null);
 
   const locationSubRef = useRef(null);
   const reservationSubRef = useRef(null);
   const passengerSubRef = useRef(null);
   const idleDemandSubRef = useRef(null);
   const tripSubRef = useRef(null);
+  const rideRequestSubRef = useRef(null);
   const tripRef = useRef(trip);
   const restoredTripRef = useRef(false);
   useEffect(() => { tripRef.current = trip; }, [trip]);
@@ -1237,6 +1456,143 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
     }
     setPassengerLocations([]);
   }, []);
+
+  const stopRideRequestSubscription = useCallback(() => {
+    if (rideRequestSubRef.current) {
+      supabase.removeChannel(rideRequestSubRef.current);
+      rideRequestSubRef.current = null;
+    }
+    setPendingRequestPassengerIds(new Set());
+  }, []);
+
+  const startRideRequestSubscription = useCallback((tripId) => {
+    stopRideRequestSubscription();
+    const ch = subscribeToTripRideRequests(tripId, (requests) => {
+      setPendingRequestPassengerIds(new Set(requests.map((r) => r.passenger_id)));
+    });
+    rideRequestSubRef.current = ch;
+  }, [stopRideRequestSubscription]);
+
+  const completeInviteSend = useCallback(async (passenger, paymentReference) => {
+    const current = tripRef.current;
+    const pid = passenger?.passenger_id;
+    if (!current?.tripId || !pid) return;
+
+    const { data, error } = await sendMateRideRequest(
+      current.tripId,
+      pid,
+      paymentReference ?? null,
+    );
+    if (error) {
+      Alert.alert('Unable to send request', formatSupabaseError(error.message));
+      return;
+    }
+    setPendingRequestPassengerIds((prev) => new Set(prev).add(pid));
+    if (!data?.already_sent) {
+      hapticSuccess();
+      Alert.alert('Request sent', 'The passenger will receive your seat invitation.');
+      // Push to passenger
+      const routeLabel = tripRef.current?.route
+        ? `${tripRef.current.route.origin ?? ''} → ${tripRef.current.route.destination ?? ''}`
+        : 'your route';
+      sendPushToUser({
+        recipientId: pid,
+        title: 'Seat invitation',
+        body: `A mate is heading your way on ${routeLabel}. Tap to reserve your seat!`,
+        data: { type: 'seat_invite', tripId: tripRef.current?.tripId ?? null },
+      });
+    }
+  }, []);
+
+  const runPaidInviteFlow = useCallback(async (passenger, email) => {
+    const current = tripRef.current;
+    const pid = passenger?.passenger_id;
+    const tripFareGhs = Number(
+      current?.fareGhs ?? resolveMateRouteFare(current?.route) ?? 0,
+    );
+    if (!mateId || !current?.tripId || !pid) return;
+
+    const breakdown = estimateMateInviteFee(tripFareGhs);
+    if (!breakdown) {
+      Alert.alert('Set trip fare', 'Set your seat price on this trip before sending paid invites.');
+      return;
+    }
+
+    await saveMatePaymentEmail(email);
+
+    setSendingRequestPassengerId(pid);
+    try {
+      const pay = await payForMateInvite({
+        mateId,
+        tripId: current.tripId,
+        tripFareGhs,
+        email,
+        passengerId: pid,
+        onPhase: (phase) => {
+          if (phase === 'confirming') setSendingRequestPassengerId(pid);
+        },
+      });
+
+      await completeInviteSend(passenger, pay.skipped ? null : pay.reference);
+    } catch (e) {
+      const msg = e instanceof MateInvitePaymentError
+        ? e.message
+        : e?.message ?? 'Payment failed';
+      Alert.alert('Invite payment', msg);
+    } finally {
+      setSendingRequestPassengerId(null);
+    }
+  }, [mateId, completeInviteSend]);
+
+  const sendRideRequest = useCallback(async (passenger) => {
+    const current = tripRef.current;
+    const pid = passenger?.passenger_id;
+    if (!current?.tripId || !pid || current.seatsLeft <= 0) return;
+
+    const tripFareGhs = Number(
+      current?.fareGhs ?? resolveMateRouteFare(current?.route) ?? 0,
+    );
+
+    if (PAYMENTS_ENABLED && tripFareGhs > 0) {
+      const breakdown = estimateMateInviteFee(tripFareGhs);
+      if (!breakdown) {
+        Alert.alert('Set trip fare', 'Set your seat price before sending invites.');
+        return;
+      }
+
+      const proceed = await new Promise((resolve) => {
+        Alert.alert(
+          'Pay to send invite',
+          `Platform fee (8%): GHS ${breakdown.platformFeeGhs}\n`
+            + `Request fee: GHS ${breakdown.requestFeeGhs}\n`
+            + `Total: GHS ${breakdown.totalGhs}\n\n`
+            + 'You must complete MoMo payment before the passenger is notified.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Pay & send', onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (!proceed) return;
+
+      let email = await getMatePaymentEmail();
+      if (!isValidMatePaymentEmail(email)) {
+        pendingInviteRef.current = passenger;
+        setMomoEmailModal(' ');
+        return;
+      }
+
+      await runPaidInviteFlow(passenger, email);
+      return;
+    }
+
+    setSendingRequestPassengerId(pid);
+    try {
+      await completeInviteSend(passenger, null);
+    } finally {
+      setSendingRequestPassengerId(null);
+    }
+  }, [runPaidInviteFlow, completeInviteSend]);
 
   const applyPassengerLocations = useCallback((locs) => {
     setIdleDemand(buildDemandFromLocations(locs));
@@ -1274,6 +1630,27 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
     };
   }, [mode, applyPassengerLocations]);
 
+  useEffect(() => {
+    if (mode !== 'idle' && mode !== 'setup') {
+      setScheduledDemand([]);
+      return undefined;
+    }
+    let cancelled = false;
+    const loadScheduled = () => {
+      fetchUpcomingScheduledDemand(20)
+        .then(({ data }) => {
+          if (!cancelled) setScheduledDemand(data ?? []);
+        })
+        .catch(() => {});
+    };
+    loadScheduled();
+    const pollId = setInterval(loadScheduled, LIVE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(pollId);
+    };
+  }, [mode]);
+
   const stopTripSubscription = useCallback(() => {
     if (tripSubRef.current) {
       supabase.removeChannel(tripSubRef.current);
@@ -1283,9 +1660,9 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
 
   const refreshActiveTripData = useCallback(async (tripId) => {
     if (!tripId) return;
-    const [{ data: row }, { data: reservations }] = await Promise.all([
+    const [{ data: row }, { data: reservations, error: resErr }] = await Promise.all([
       fetchTripById(tripId),
-      fetchActiveReservationsForTrip(tripId),
+      fetchMateTripReservations(tripId),
     ]);
     if (row) {
       setTrip((current) => applyTripRowFromDb(current, row));
@@ -1295,9 +1672,12 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         return;
       }
     }
-    if (reservations) {
-      setReservationCount(reservations.length);
+    if (resErr && !isMateAuthError(resErr)) {
+      console.warn('[Mate] load reservations:', resErr.message ?? resErr);
     }
+    const list = reservations ?? [];
+    setReservationCount(list.length);
+    setTripReservations(list);
     setLastSyncAt(Date.now());
   }, []);
 
@@ -1322,6 +1702,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
       }
       if (event.reservations) {
         setReservationCount(event.reservations.length);
+        setTripReservations(event.reservations);
         setLastSyncAt(Date.now());
       }
       refreshActiveTripData(tripId);
@@ -1336,6 +1717,26 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
     }
   }, []);
 
+  // Backup poll — realtime can miss events on flaky networks.
+  useEffect(() => {
+    if (mode !== 'active' || !trip?.tripId) return undefined;
+
+    const poll = () => {
+      fetchMateTripReservations(trip.tripId)
+        .then(({ data, error }) => {
+          if (error) return;
+          const rows = data ?? [];
+          setTripReservations(rows);
+          setReservationCount(rows.length);
+        })
+        .catch(() => {});
+    };
+
+    poll();
+    const id = setInterval(poll, 12_000);
+    return () => clearInterval(id);
+  }, [mode, trip?.tripId]);
+
   // ─── Location helpers ──────────────────────────────────────────────────────
   const stopLocationTracking = useCallback(async (skipDelete = false) => {
     if (locationSubRef.current) {
@@ -1344,9 +1745,10 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
       locationSubRef.current = null;
     }
     if (!skipDelete && mateId) {
-      await deleteDriverLocation(mateId).catch((e) =>
-        console.warn('[Mate] deleteDriverLocation failed:', e.message),
-      );
+      const { error } = await deleteDriverLocation(mateId);
+      if (error && !isMateAuthError(error)) {
+        console.warn('[Mate] deleteDriverLocation failed:', error.message);
+      }
     }
   }, [mateId]);
 
@@ -1367,11 +1769,19 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
       setLastSyncAt(Date.now());
       const currentTrip = tripRef.current;
       if (mateId && currentTrip) {
-        await upsertDriverLocation(
-          mateId, formatRoute(currentTrip.route), latitude, longitude, currentTrip.seatsLeft, initial.coords.heading ?? null,
+        const { error } = await upsertDriverLocation(
+          mateId,
+          formatRoute(currentTrip.route),
+          latitude,
+          longitude,
+          currentTrip.seatsLeft,
+          initial.coords.heading ?? null,
+          resolveMateRouteFare(currentTrip.route),
         );
-        setLastSyncAt(Date.now());
-        setTrip((t) => t && t.locationStatus !== 'active' ? { ...t, locationStatus: 'active' } : t);
+        if (!error) {
+          setLastSyncAt(Date.now());
+          setTrip((t) => t && t.locationStatus !== 'active' ? { ...t, locationStatus: 'active' } : t);
+        }
       }
     } catch {
       // watch will retry
@@ -1417,10 +1827,18 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         lastUploadAt = now;
 
         const { error } = await upsertDriverLocation(
-          mateId, formatRoute(currentTrip.route), latitude, longitude, currentTrip.seatsLeft, heading,
+          mateId,
+          formatRoute(currentTrip.route),
+          latitude,
+          longitude,
+          currentTrip.seatsLeft,
+          heading,
+          resolveMateRouteFare(currentTrip.route),
         );
         if (error) {
-          console.warn('[Mate] upsertDriverLocation failed:', error.message);
+          if (!isMateAuthError(error)) {
+            console.warn('[Mate] upsertDriverLocation failed:', error.message);
+          }
         } else {
           setLastSyncAt(Date.now());
           setTrip((t) => t && t.locationStatus !== 'active' ? { ...t, locationStatus: 'active' } : t);
@@ -1451,7 +1869,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         }
       })
       .catch(() => {});
-  }, [mode, mateCoords?.latitude, mateCoords?.longitude]);
+  }, [mode, mateCoords]);
 
   // ─── Trip actions ──────────────────────────────────────────────────────────
   const [setupOpenCustom, setSetupOpenCustom] = useState(false);
@@ -1468,7 +1886,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
       destination,
     });
     if (error) {
-      Alert.alert('Could not update destination', formatSupabaseError(error.message));
+      Alert.alert('Unable to update destination', formatSupabaseError(error.message));
       return;
     }
     setTrip((current) => {
@@ -1490,7 +1908,13 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         mateCoords?.latitude ?? null,
         mateCoords?.longitude ?? null,
         trip.seatsLeft,
-      ).catch(() => {});
+        null,
+        resolveMateRouteFare(nextRoute),
+      ).then(({ error }) => {
+        if (error && !isMateAuthError(error)) {
+          console.warn('[Mate] location route sync failed:', error.message);
+        }
+      });
     }
   }, [trip, mateId, mateCoords]);
 
@@ -1506,38 +1930,59 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         return;
       }
 
+      const fare = resolveMateRouteFare(route);
+
       const { data, error } = await createTrip(
         mateId,
         formatRoute(route),
         route.origin,
         route.destination,
         totalSeats,
+        fare,
       );
       if (error) {
-        Alert.alert('Could not start trip', formatSupabaseError(error.message));
+        Alert.alert('Unable to start trip', formatSupabaseError(error.message));
         return;
       }
+
+      let tripRow = data;
+      if (fare != null && (tripRow.fare_ghs == null || Number(tripRow.fare_ghs) <= 0)) {
+        const { data: patched } = await updateTripFare(tripRow.id, fare);
+        if (patched) tripRow = patched;
+      }
+
+      const routeWithFare = {
+        ...route,
+        fareGhs: tripRow.fare_ghs ?? fare,
+      };
       const newTrip = {
-        tripId: data.id,
-        route,
+        tripId: tripRow.id,
+        route: routeWithFare,
         totalSeats,
-        seatsLeft: data.available_seats ?? totalSeats,
+        seatsLeft: tripRow.available_seats ?? totalSeats,
         passengersOnboarded: 0,
         locationStatus: 'pending',
-        startedAt: data.created_at ?? new Date().toISOString(),
+        startedAt: tripRow.created_at ?? new Date().toISOString(),
       };
-      console.log('[Mate] Trip started in Supabase →', { id: data.id, route: formatRoute(route), totalSeats });
+      console.log('[Mate] Trip started in Supabase →', {
+        id: tripRow.id,
+        route: formatRoute(routeWithFare),
+        totalSeats,
+        fareGhs: routeWithFare.fareGhs,
+      });
       setTrip(newTrip);
       setMode('active');
+      hapticSuccess();
       setReservationCount(0);
-      startReservationSubscription(data.id);
-      startTripSubscription(data.id);
+      startReservationSubscription(tripRow.id);
+      startTripSubscription(tripRow.id);
       startPassengerSubscription();
-      await startLocationTracking(route);
+      startRideRequestSubscription(tripRow.id);
+      await startLocationTracking(routeWithFare);
     } finally {
       setDepartLoading(false);
     }
-  }, [mateId, startLocationTracking, startReservationSubscription, startTripSubscription, startPassengerSubscription]);
+  }, [mateId, startLocationTracking, startReservationSubscription, startTripSubscription, startPassengerSubscription, startRideRequestSubscription]);
 
   const onboard = useCallback(() => {
     setTrip((current) => {
@@ -1546,21 +1991,57 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
       const status    = seatsLeft === 0 ? 'full' : 'active';
       const next = { ...current, seatsLeft, passengersOnboarded: current.passengersOnboarded + 1 };
 
+      hapticMedium();
       console.log('[Mate] Passenger onboarded →', { passengersOnboarded: next.passengersOnboarded, seatsLeft });
       updateTripSeats(current.tripId, seatsLeft, status)
-        .catch((e) => console.warn('[Mate] updateTripSeats failed:', e.message));
+        .then(({ error }) => {
+          if (error && !isMateAuthError(error)) {
+            console.warn('[Mate] updateTripSeats failed:', error.message);
+          }
+        });
       upsertDriverLocation(
         mateId,
         formatRoute(next.route),
         mateCoordsRef.current?.latitude ?? null,
         mateCoordsRef.current?.longitude ?? null,
         seatsLeft,
+        null,
+        resolveMateRouteFare(next.route),
       )
-        .catch((e) => console.warn('[Mate] location seats sync failed:', e.message));
+        .then(({ error }) => {
+          if (error && !isMateAuthError(error)) {
+            console.warn('[Mate] location seats sync failed:', error.message);
+          }
+        });
 
       if (seatsLeft === 0) console.log('[Mate] Trip auto-marked full');
       return next;
     });
+  }, [mateId]);
+
+  const boardReservedPassenger = useCallback(async (reservationId) => {
+    if (!mateId || !reservationId) return;
+    const { data, error } = await boardReservation(reservationId, mateId);
+    if (error || data?.ok === false) {
+      Alert.alert('Unable to board passenger', formatSupabaseError(error?.message ?? data?.error ?? 'Please try again.'));
+      return;
+    }
+    setTrip((current) => {
+      if (!current) return current;
+      const seatsLeft = data.available_seats ?? current.seatsLeft;
+      return {
+        ...current,
+        seatsLeft,
+        passengersOnboarded: current.passengersOnboarded + 1,
+      };
+    });
+    const tripId = tripRef.current?.tripId;
+    if (tripId) {
+      const { data: list } = await fetchMateTripReservations(tripId);
+      const rows = list ?? [];
+      setTripReservations(rows);
+      setReservationCount(rows.length);
+    }
   }, [mateId]);
 
   const markTripFull = useCallback(() => {
@@ -1570,15 +2051,25 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
 
       console.log('[Mate] Trip manually marked full →', filled);
       updateTripSeats(current.tripId, 0, 'full')
-        .catch((e) => console.warn('[Mate] updateTripSeats failed:', e.message));
+        .then(({ error }) => {
+          if (error && !isMateAuthError(error)) {
+            console.warn('[Mate] updateTripSeats failed:', error.message);
+          }
+        });
       upsertDriverLocation(
         mateId,
         formatRoute(filled.route),
         mateCoordsRef.current?.latitude ?? null,
         mateCoordsRef.current?.longitude ?? null,
         0,
+        null,
+        resolveMateRouteFare(filled.route),
       )
-        .catch((e) => console.warn('[Mate] location seats sync failed:', e.message));
+        .then(({ error }) => {
+          if (error && !isMateAuthError(error)) {
+            console.warn('[Mate] location seats sync failed:', error.message);
+          }
+        });
 
       return filled;
     });
@@ -1587,24 +2078,30 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
   const handleEndTrip = useCallback(async () => {
     const current = tripRef.current;
     if (current?.tripId) {
-      await endTripDb(current.tripId)
-        .catch((e) => console.warn('[Mate] endTrip DB failed:', e.message));
+      const { error } = await endTripDb(current.tripId);
+      if (error && !isMateAuthError(error)) {
+        console.warn('[Mate] endTrip DB failed:', error.message);
+      }
     }
 
     if (current?.passengersOnboarded > 0) {
-      const amountGhs = current.passengersOnboarded * getRouteFare(current.route);
-      const nextTotal = await recordTripEarnings({
-        amountGhs,
-        route: formatRoute(current.route),
-        passengers: current.passengersOnboarded,
-      }).catch(() => earningsTotal);
-      setEarningsTotal(nextTotal);
+      const unitFare = resolveMateRouteFare(current.route);
+      if (unitFare != null) {
+        const amountGhs = current.passengersOnboarded * unitFare;
+        const nextTotal = await recordTripEarnings({
+          amountGhs,
+          route: formatRoute(current.route),
+          passengers: current.passengersOnboarded,
+        }).catch(() => earningsTotal);
+        setEarningsTotal(nextTotal);
+      }
     }
 
     await stopLocationTracking(false);
     stopReservationSubscription();
     stopTripSubscription();
     stopPassengerSubscription();
+    stopRideRequestSubscription();
     setMateCoords(null);
     setReservationCount(0);
     if (current) {
@@ -1617,7 +2114,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
     }
     setTrip(null);
     setMode('idle');
-  }, [stopLocationTracking, stopReservationSubscription, stopTripSubscription, stopPassengerSubscription, earningsTotal]);
+  }, [stopLocationTracking, stopReservationSubscription, stopTripSubscription, stopPassengerSubscription, stopRideRequestSubscription, earningsTotal]);
 
   useEffect(() => {
     if (!mateId || restoredTripRef.current) return;
@@ -1627,27 +2124,9 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
       const { data: activeTrip } = await getActiveMateTrip(mateId);
       if (!activeTrip) return;
 
-      const routeId = findRouteIdByLabel(activeTrip.route);
-      let route = findRouteById(routeId);
-      if (!route) {
-        const customs = await getCustomRoutes().catch(() => []);
-        const customMatch = customs.find(
-          (r) =>
-            r.origin === activeTrip.origin &&
-            r.destination === activeTrip.destination,
-        );
-        route = customMatch ?? {
-          id: routeId ?? `custom_restored_${activeTrip.id}`,
-          origin: activeTrip.origin,
-          destination: activeTrip.destination,
-          fareGhs: getRouteFare(null),
-          mapCenter:
-            getPlaceCoords(activeTrip.origin) ??
-            getPlaceCoords(activeTrip.destination) ??
-            DEFAULT_MAP_REGION,
-          isCustom: !customMatch,
-        };
-      }
+      const customs = await getCustomRoutes().catch(() => []);
+      const route = buildRouteFromTripRow(activeTrip, customs);
+      if (!route) return;
 
       const restored = {
         tripId: activeTrip.id,
@@ -1665,6 +2144,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
       startReservationSubscription(activeTrip.id);
       startTripSubscription(activeTrip.id);
       startPassengerSubscription();
+      startRideRequestSubscription(activeTrip.id);
       await startLocationTracking(route);
     })();
   }, [
@@ -1672,6 +2152,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
     startLocationTracking,
     startPassengerSubscription,
     startReservationSubscription,
+    startRideRequestSubscription,
     startTripSubscription,
   ]);
 
@@ -1682,10 +2163,30 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
       stopReservationSubscription();
       stopTripSubscription();
       stopPassengerSubscription();
+      stopRideRequestSubscription();
     };
-  }, [stopLocationTracking, stopReservationSubscription, stopTripSubscription, stopPassengerSubscription]);
+  }, [stopLocationTracking, stopReservationSubscription, stopTripSubscription, stopPassengerSubscription, stopRideRequestSubscription]);
 
   const defaultRouteId = findRouteIdByLabel(profile?.default_route);
+
+  const inviteFeeLabel = useMemo(() => {
+    if (!PAYMENTS_ENABLED || !trip) return null;
+    const fare = Number(trip.fareGhs ?? resolveMateRouteFare(trip.route) ?? 0);
+    const b = estimateMateInviteFee(fare);
+    return b ? `GHS ${b.totalGhs}` : null;
+  }, [trip]);
+
+  const handleMomoEmailSubmit = useCallback(async (email) => {
+    const passenger = pendingInviteRef.current;
+    setMomoEmailModal(null);
+    pendingInviteRef.current = null;
+    if (!passenger) return;
+    if (!isValidMatePaymentEmail(email)) {
+      Alert.alert('Invalid email', 'Enter a valid email for MoMo checkout.');
+      return;
+    }
+    await runPaidInviteFlow(passenger, email.trim().toLowerCase());
+  }, [runPaidInviteFlow]);
 
   if (!mateId) {
     return (
@@ -1700,6 +2201,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
   }
 
   return (
+    <PremiumBackground variant="mate">
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.dashboardHeader}>
         <View style={styles.dashboardLogoRow}>
@@ -1708,7 +2210,9 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
           </View>
           <View>
             <Text style={styles.dashboardName} numberOfLines={1}>{profile?.full_name ?? 'Mate Dashboard'}</Text>
-            <Text style={styles.dashboardSub} numberOfLines={1}>{profile?.vehicle_registration ?? 'No vehicle on file'}</Text>
+            <Text style={styles.dashboardSub} numberOfLines={1}>
+              {[profile?.vehicle_type, profile?.vehicle_registration].filter(Boolean).join(' · ') || 'No vehicle on file'}
+            </Text>
           </View>
         </View>
         <Pressable
@@ -1727,7 +2231,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
         <View style={styles.profileWarning}>
           <Ionicons name="warning-outline" size={18} color="#FCD34D" />
           <Text style={styles.profileWarningText}>
-            Profile incomplete — open Account to add your name and vehicle plate before passengers see your trip.
+            Profile incomplete. Open Account to add your name and vehicle registration before passengers can see your trip.
           </Text>
         </View>
       ) : null}
@@ -1739,6 +2243,7 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
             onStartWithDestination={startSetupWithCustom}
             onOpenEarn={onOpenEarn}
             demand={idleDemand}
+            scheduledDemand={scheduledDemand}
             earningsTotal={earningsTotal}
             lastSyncAt={lastSyncAt}
             defaultRouteLabel={profile?.default_route ?? null}
@@ -1751,28 +2256,48 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
             defaultRouteId={defaultRouteId}
             loading={departLoading}
             demand={idleDemand}
+            scheduledDemand={scheduledDemand}
             lastSyncAt={lastSyncAt}
             startWithCustomEditor={setupOpenCustom}
             mateCoords={mateCoords}
+            vehicleType={profile?.vehicle_type ?? DEFAULT_VEHICLE_TYPE}
           />
         ) : null}
         {mode === 'active' && trip ? (
           <ActiveView
             trip={trip}
             onOnboard={onboard}
+            onBoardReservation={boardReservedPassenger}
             onTripFull={markTripFull}
             onEndTrip={handleEndTrip}
             onOpenEarn={onOpenEarn}
             onUpdateDestination={updateActiveTripDestination}
             reservationBannerKey={reservationBannerKey}
             reservationCount={reservationCount}
+            tripReservations={tripReservations}
             mateCoords={mateCoords}
             passengerLocations={passengerLocations}
             lastSyncAt={lastSyncAt}
+            onSendRideRequest={sendRideRequest}
+            pendingRequestPassengerIds={pendingRequestPassengerIds}
+            sendingRequestPassengerId={sendingRequestPassengerId}
+            inviteFeeLabel={inviteFeeLabel}
+            paymentsEnabled={PAYMENTS_ENABLED}
           />
         ) : null}
       </View>
+
+      <MateMoMoEmailModal
+        visible={momoEmailModal !== null}
+        initialEmail={typeof momoEmailModal === 'string' ? momoEmailModal : ''}
+        onCancel={() => {
+          setMomoEmailModal(null);
+          pendingInviteRef.current = null;
+        }}
+        onSubmit={handleMomoEmailSubmit}
+      />
     </SafeAreaView>
+    </PremiumBackground>
   );
 }
 
@@ -1867,7 +2392,7 @@ const styles = StyleSheet.create({
   sectionLabel:        { color: C.TEXT_MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 12, marginTop: 8 },
   routeList:           { gap: 8, marginBottom: 24 },
   routeRow:            { flexDirection: 'row', alignItems: 'center', backgroundColor: C.SURFACE, borderRadius: 14, paddingHorizontal: 16, minHeight: 58, borderWidth: 1, borderColor: C.BORDER, gap: 14 },
-  routeRowSelected:    { borderColor: C.ACCENT + '80', backgroundColor: 'rgba(249,115,22,0.08)' },
+  routeRowSelected:    { borderColor: C.ACCENT + '80', backgroundColor: 'rgba(243,111,33,0.08)' },
   routeRadio:          { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: C.TEXT_MUTED, alignItems: 'center', justifyContent: 'center' },
   routeRadioSelected:  { borderColor: C.ACCENT },
   routeRadioDot:       { width: 10, height: 10, borderRadius: 5, backgroundColor: C.ACCENT },
@@ -1892,7 +2417,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     minHeight: 52, borderRadius: 14,
     borderWidth: 1, borderStyle: 'dashed', borderColor: C.ACCENT + '66',
-    backgroundColor: 'rgba(249,115,22,0.05)',
+    backgroundColor: 'rgba(243,111,33,0.05)',
     marginBottom: 24,
   },
   addCustomText: { color: C.ACCENT, fontSize: 14, fontWeight: '700' },
@@ -1922,7 +2447,7 @@ const styles = StyleSheet.create({
   destinationIcon: {
     width: 40, height: 40, borderRadius: 14,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: C.ACCENT_SOFT ?? 'rgba(249,115,22,0.12)',
+    backgroundColor: C.ACCENT_SOFT ?? 'rgba(243,111,33,0.12)',
     borderWidth: 1, borderColor: C.ACCENT + '40',
   },
   destinationText: { flex: 1 },
@@ -1946,7 +2471,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 8, paddingVertical: 3,
     borderRadius: 8,
-    backgroundColor: C.ACCENT_SOFT ?? 'rgba(249,115,22,0.12)',
+    backgroundColor: C.ACCENT_SOFT ?? 'rgba(243,111,33,0.12)',
     borderWidth: 1, borderColor: C.ACCENT + '40',
   },
   myLocChipText: { color: C.ACCENT, fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
@@ -1993,14 +2518,15 @@ const styles = StyleSheet.create({
   stepperCenter:       { flex: 1, alignItems: 'center' },
   stepperValue:        { color: C.TEXT, fontSize: 38, fontWeight: '800', lineHeight: 42 },
   stepperHint:         { color: C.TEXT_MUTED, fontSize: 12, fontWeight: '600' },
+  stepperSubLabel:     { color: C.TEXT_SUB, fontSize: 12, fontWeight: '600', marginBottom: 8 },
   departButton:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: C.ACCENT, borderRadius: 14, minHeight: 58, gap: 10, marginTop: 8, shadowColor: C.ACCENT, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 12 },
   departButtonDisabled:{ backgroundColor: C.SURFACE_UP, shadowOpacity: 0 },
   departButtonText:    { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
 
   // Active
-  activeContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 16 },
+  activeContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 16, minHeight: 0 },
 
-  activeTripCard:    { backgroundColor: C.SURFACE, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: C.BORDER, marginBottom: 14 },
+  activeTripCard:    { flexShrink: 0, backgroundColor: C.SURFACE, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: C.BORDER, marginBottom: 14 },
   activeTripTop:     { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 },
   activeTripInfo:    { flex: 1, paddingRight: 12 },
   activeRouteHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
@@ -2009,7 +2535,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 8, paddingVertical: 4,
     borderRadius: 8,
-    backgroundColor: C.ACCENT_SOFT ?? 'rgba(249,115,22,0.12)',
+    backgroundColor: C.ACCENT_SOFT ?? 'rgba(243,111,33,0.12)',
     borderWidth: 1, borderColor: C.ACCENT + '40',
   },
   editDestBtnText: { color: C.ACCENT, fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
@@ -2034,24 +2560,121 @@ const styles = StyleSheet.create({
   locationDotActive: { backgroundColor: C.SUCCESS },
   locationBadgeText: { color: C.TEXT_MUTED, fontSize: 12, fontWeight: '600' },
   syncHint: { color: C.TEXT_MUTED, fontSize: 10, fontWeight: '600' },
-  mapToggle:         { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, borderWidth: 1, borderColor: C.BORDER, backgroundColor: C.SURFACE_UP },
-  mapToggleOn:       { borderColor: C.ACCENT + '60', backgroundColor: C.ACCENT_SOFT },
-  mapToggleText:     { color: C.TEXT_SUB, fontSize: 13, fontWeight: '700' },
 
-  activeBody:      { flex: 1, minHeight: 120 },
-  activeFooter:    { paddingTop: 12, paddingBottom: TAB_FOOTER_CLEARANCE, borderTopWidth: 1, borderTopColor: C.BORDER },
-  onboardButton:   { flex: 1, minHeight: 140, borderRadius: 20, backgroundColor: C.ACCENT, alignItems: 'center', justifyContent: 'center', shadowColor: C.ACCENT, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 8 },
-  onboardButtonFull: { backgroundColor: '#7F1D1D', shadowOpacity: 0 },
-  onboardButtonInner: { alignItems: 'center', gap: 8 },
-  onboardButtonText:  { color: '#FFFFFF', fontSize: 28, fontWeight: '900', letterSpacing: 0.5 },
+  activeControlsSection: { flexShrink: 0, marginBottom: 12, gap: 10 },
+  onboardButton:   { minHeight: 96, borderRadius: 20, backgroundColor: C.ACCENT, alignItems: 'center', justifyContent: 'center', shadowColor: C.ACCENT, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 8 },
+  onboardButtonFull: { backgroundColor: Theme.colors.seatFull, shadowOpacity: 0 },
+  onboardButtonInner: { alignItems: 'center', gap: 6 },
+  onboardButtonText:  { color: '#FFFFFF', fontSize: 24, fontWeight: '900', letterSpacing: 0.5 },
   onboardButtonSub:   { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '500' },
+  reservationList: { paddingHorizontal: 20, paddingBottom: 12, gap: 8 },
+  reservationListTitle: { color: C.TEXT_SUB, fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  reservationPanel: {
+    flexShrink: 0,
+    backgroundColor: 'rgba(243,111,33,0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: C.ACCENT + '55',
+  },
+  reservationPanelHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  reservationPanelTitle: { color: C.ACCENT, fontSize: 12, fontWeight: '800', flex: 1 },
+  reservationPanelScroll: { maxHeight: 88 },
+  reservationPanelScrollContent: { gap: 6, paddingBottom: 2 },
+  reservationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: C.SURFACE,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: C.BORDER,
+  },
+  reservationRowBody: { flex: 1, minWidth: 0 },
+  reservationRowText: { color: C.TEXT, fontSize: 13, fontWeight: '600' },
+  reservationRowSub: { color: C.TEXT_MUTED, fontSize: 11, fontWeight: '500', marginTop: 2 },
+  reservationBoardBtn: { color: C.ACCENT, fontWeight: '800', fontSize: 13 },
+  waitingPanel: {
+    flexShrink: 0,
+    backgroundColor: 'rgba(59,130,246,0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: C.PASSENGER_MAP + '55',
+  },
+  waitingPanelHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  waitingPanelTitle: { color: C.PASSENGER_MAP, fontSize: 12, fontWeight: '800', flex: 1 },
+  inviteFeeHint: {
+    color: C.TEXT_MUTED,
+    fontSize: 11,
+    lineHeight: 16,
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  waitingPanelScroll: { maxHeight: 96 },
+  waitingPanelScrollContent: { gap: 6, paddingBottom: 2 },
+  waitingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: C.SURFACE,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: C.BORDER,
+  },
+  waitingRowBody: { flex: 1, minWidth: 0 },
+  waitingRowText: { color: C.TEXT, fontSize: 13, fontWeight: '600' },
+  waitingRowSub: { color: C.TEXT_MUTED, fontSize: 11, fontWeight: '500', marginTop: 2 },
+  waitingSendBtn: {
+    backgroundColor: C.PASSENGER_MAP,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  waitingSendBtnMuted: { backgroundColor: C.SURFACE_UP, borderWidth: 1, borderColor: C.BORDER },
+  waitingSendBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 11 },
+  calloutRequestBtn: {
+    marginTop: 8,
+    backgroundColor: C.PASSENGER_MAP,
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  calloutRequestBtnSent: { backgroundColor: C.SURFACE_UP, borderWidth: 1, borderColor: C.BORDER },
+  calloutRequestBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  liveStatPillReserved: {
+    backgroundColor: 'rgba(243,111,33,0.15)',
+    borderColor: C.ACCENT + '66',
+    borderWidth: 1,
+  },
+  liveStatTextReserved: { color: C.ACCENT, fontWeight: '800' },
   activeSecondaryRow: { flexDirection: 'row', gap: 12 },
   fullButton:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.SURFACE, borderRadius: 14, minHeight: 52, borderWidth: 1, borderColor: C.ACCENT + '50' },
   fullButtonText:{ color: C.ACCENT, fontSize: 15, fontWeight: '700' },
   endButton:     { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.SURFACE, borderRadius: 14, minHeight: 52, borderWidth: 1, borderColor: C.BORDER },
   endButtonText: { color: C.TEXT_MUTED, fontSize: 15, fontWeight: '700' },
 
-  mateMapWrapper:  { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: '#060606', borderWidth: 1, borderColor: C.BORDER },
+  mateMapWrapper: {
+    flex: 1,
+    minHeight: 220,
+    marginBottom: TAB_FOOTER_CLEARANCE,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#060606',
+    borderWidth: 1,
+    borderColor: C.BORDER,
+  },
   mapEmptyOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 14 },
   mapEmptyPill:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.75)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
   mapEmptyText:    { color: C.TEXT_SUB, fontSize: 12 },
@@ -2063,7 +2686,7 @@ const styles = StyleSheet.create({
     borderWidth: 2.5, borderColor: '#FFFFFF',
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.35, shadowRadius: 4,
   },
-  tripPinOrigin:       { backgroundColor: '#22C55E' },
+  tripPinOrigin:       { backgroundColor: Theme.colors.success },
   tripPinDest:         { backgroundColor: C.ACCENT },
   tripPinLabel:        {
     marginTop: 4,

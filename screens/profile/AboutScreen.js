@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.35)',
+    borderColor: 'rgba(243,111,33,0.35)',
     marginBottom: 14,
   },
   title: { color: Theme.colors.text, fontSize: 26, fontWeight: '900', letterSpacing: -0.5 },
