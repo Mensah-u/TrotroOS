@@ -74,6 +74,71 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 });
 
+function isStaleAuthError(err) {
+  const msg = err?.message ?? String(err ?? '');
+  return /refresh token|invalid.*token|session.*not found|jwt expired/i.test(msg);
+}
+
+function supabaseProjectRef() {
+  try {
+    const host = new URL(SUPABASE_URL).hostname;
+    return host.split('.')[0] || '';
+  } catch {
+    return '';
+  }
+}
+
+async function purgeLocalAuthStorage() {
+  const ref = supabaseProjectRef();
+  if (!ref) return;
+  const key = `sb-${ref}-auth-token`;
+  try {
+    await AsyncStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+/** Clear broken mate sessions (e.g. after DB reset or expired refresh token). */
+export async function clearStaleAuthSession() {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error && isStaleAuthError(error)) {
+      await supabase.auth.signOut({ scope: 'local' });
+      await purgeLocalAuthStorage();
+      return true;
+    }
+    if (data?.session) {
+      const { error: userError } = await supabase.auth.getUser();
+      if (userError && isStaleAuthError(userError)) {
+        await supabase.auth.signOut({ scope: 'local' });
+        await purgeLocalAuthStorage();
+        return true;
+      }
+    }
+  } catch (err) {
+    if (isStaleAuthError(err)) {
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+        await purgeLocalAuthStorage();
+        return true;
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return false;
+}
+
+clearStaleAuthSession().catch(() => {});
+
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_OUT' || session) return;
+  if (event === 'INITIAL_SESSION' && !session) {
+    purgeLocalAuthStorage().catch(() => {});
+  }
+});
+
 // ─── Table names ────────────────────────────────────────────────────────────
 const T = {
   MATE_PROFILES:       'mate_profiles',
@@ -104,8 +169,14 @@ export async function getMateSession() {
         setTimeout(() => reject(new Error('Session check timed out')), 8000);
       }),
     ]);
+    if (result?.error && isStaleAuthError(result.error)) {
+      await supabase.auth.signOut({ scope: 'local' });
+      await purgeLocalAuthStorage();
+      return { data: { session: null }, error: null };
+    }
     return result;
   } catch {
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
     return { data: { session: null }, error: null };
   }
 }

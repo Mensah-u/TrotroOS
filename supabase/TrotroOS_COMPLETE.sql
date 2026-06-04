@@ -1,6 +1,6 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- TrotroOS · COMPLETE DATABASE SETUP (auto-generated)
--- Generated: 2026-05-31T21:16:17.419Z
+-- Generated: 2026-06-04T06:49:25.552Z
 --
 -- Paste this ENTIRE file into Supabase SQL Editor → Run once
 -- https://supabase.com/dashboard/project/siwzjxwholmoassrdtwx/sql/new
@@ -15,10 +15,15 @@
 --   4. FIX_mate_ride_requests.sql
 --   5. FIX_mate_reservations.sql
 --   6. FIX_nearby_indexes.sql
---   7. migrations/007_payment_transactions.sql
---   8. FIX_reservations_passenger_id_alter.sql
---   9. FIX_baseline_rls_policies.sql
---   10. FIX_security_hardening.sql
+--   7. FIX_payments_and_wallet.sql
+--   8. migrations/007_payment_transactions.sql
+--   9. migrations/008_payment_reservation_link.sql
+--   10. migrations/009_mate_invite_payments.sql
+--   11. migrations/010_mate_payouts.sql
+--   12. FIX_reservations_passenger_id_alter.sql
+--   13. FIX_baseline_rls_policies.sql
+--   14. FIX_security_hardening.sql
+--   15. FIX_missing_ride_request_rpc.sql
 --
 -- Safe to re-run on an existing project (uses IF NOT EXISTS / DROP POLICY IF EXISTS).
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -1237,6 +1242,113 @@ notify pgrst, 'reload schema';
 
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- BEGIN: FIX_payments_and_wallet.sql
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Payments, wallet ledger, webhook idempotency.
+--
+-- Run this AFTER FIX_mate_depart_now.sql. Idempotent — safe to re-run.
+--
+-- This migration backs:
+--   • server/api/index.js  → /payments/init, /webhooks/paystack, /wallet/*
+--   • services/paymentsApi.js (client)
+--
+-- The mobile client never writes to these tables directly. RLS is locked down
+-- to authenticated reads of own rows; all writes happen via the service role
+-- key on the backend.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- 1. webhook_events — idempotency for any external webhook (Paystack today,
+-- Stripe / momo provider tomorrow). The unique constraint is the linchpin
+-- that prevents double-crediting on retries.
+create table if not exists public.webhook_events (
+  id          uuid primary key default gen_random_uuid(),
+  provider    text not null,
+  event_id    text not null,
+  event_type  text,
+  raw         jsonb,
+  created_at  timestamptz not null default now(),
+  unique (provider, event_id)
+);
+
+alter table public.webhook_events enable row level security;
+
+drop policy if exists "webhook_events: no client access" on public.webhook_events;
+create policy "webhook_events: no client access"
+  on public.webhook_events for all to public using (false) with check (false);
+
+-- 2. payments — one row per Paystack transaction attempt.
+create table if not exists public.payments (
+  id                 uuid primary key default gen_random_uuid(),
+  reference          text not null unique,
+  reservation_id     uuid references public.reservations(id) on delete set null,
+  passenger_id       text,
+  amount_ghs         numeric(12,2) not null,
+  channel            text,
+  provider           text not null default 'paystack',
+  status             text not null default 'pending'
+                       check (status in ('pending','success','failed','cancelled')),
+  provider_response  jsonb,
+  created_at         timestamptz not null default now(),
+  processed_at       timestamptz
+);
+
+create index if not exists payments_reservation_idx on public.payments (reservation_id);
+create index if not exists payments_passenger_idx   on public.payments (passenger_id);
+create index if not exists payments_status_idx      on public.payments (status);
+
+alter table public.payments enable row level security;
+
+drop policy if exists "payments: passenger reads own" on public.payments;
+create policy "payments: passenger reads own"
+  on public.payments for select to authenticated
+  using (
+    passenger_id = auth.uid()::text
+    or reservation_id in (
+      select id from public.reservations where passenger_id = auth.uid()::text
+    )
+  );
+
+-- 3. wallet_ledger — append-only audit trail of every wallet movement.
+create table if not exists public.wallet_ledger (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     text not null,
+  kind        text not null check (kind in ('credit','debit','spend','payout')),
+  amount_ghs  numeric(12,2) not null,
+  reference   text,
+  note        text,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists wallet_ledger_user_idx on public.wallet_ledger (user_id, created_at desc);
+create index if not exists wallet_ledger_ref_idx  on public.wallet_ledger (reference);
+
+alter table public.wallet_ledger enable row level security;
+
+drop policy if exists "wallet_ledger: user reads own" on public.wallet_ledger;
+create policy "wallet_ledger: user reads own"
+  on public.wallet_ledger for select to authenticated
+  using (user_id = auth.uid()::text);
+
+-- 4. wallet_balances — derived view so the server can read a single row.
+create or replace view public.wallet_balances as
+  select
+    user_id,
+    coalesce(sum(case when kind in ('credit','payout') then amount_ghs else 0 end), 0)
+      - coalesce(sum(case when kind in ('debit','spend')  then amount_ghs else 0 end), 0)
+      as balance_ghs,
+    max(created_at) as last_txn_at
+  from public.wallet_ledger
+  group by user_id;
+
+grant select on public.wallet_balances to authenticated, service_role;
+
+-- 5. Make Postgres reload PostgREST schema cache so the new tables show up.
+notify pgrst, 'reload schema';
+
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- BEGIN: migrations/007_payment_transactions.sql
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1280,6 +1392,7 @@ end $$;
 
 create table if not exists public.payment_transactions (
   id                 uuid primary key default gen_random_uuid(),
+  -- TrotroOS passengers: user_id = passenger_profiles.device_id (device-scoped profile)
   user_id            text not null
                        references public.passenger_profiles (device_id)
                        on delete restrict,
@@ -1347,6 +1460,414 @@ create policy "payment_transactions: user reads own"
 
 grant select on public.payment_transactions to anon, authenticated;
 grant all on public.payment_transactions to service_role;
+
+notify pgrst, 'reload schema';
+
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- BEGIN: migrations/008_payment_reservation_link.sql
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+-- Link successful Paystack payments to active reservations (no invalid 'paid' status).
+-- Run after 007_payment_transactions.sql
+
+alter table public.reservations
+  add column if not exists payment_reference text;
+
+create index if not exists reservations_payment_reference_idx
+  on public.reservations (payment_reference)
+  where payment_reference is not null;
+
+comment on column public.reservations.payment_reference is
+  'Paystack reference from payment_transactions when MoMo/card checkout succeeds.';
+
+notify pgrst, 'reload schema';
+
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- BEGIN: migrations/009_mate_invite_payments.sql
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+-- Mate seat-invite payments: driver pays 8% of trip fare + GHS 1 request fee per invite.
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'payment_kind') then
+    create type public.payment_kind as enum ('passenger_booking', 'mate_invite');
+  end if;
+end $$;
+
+alter table public.payment_transactions
+  drop constraint if exists payment_transactions_user_id_fkey;
+
+alter table public.payment_transactions
+  add column if not exists payment_kind public.payment_kind not null default 'passenger_booking';
+
+alter table public.payment_transactions
+  add column if not exists trip_id uuid references public.trips (id) on delete set null;
+
+alter table public.payment_transactions
+  add column if not exists mate_ride_request_id uuid references public.mate_ride_requests (id) on delete set null;
+
+create index if not exists payment_transactions_trip_idx
+  on public.payment_transactions (trip_id)
+  where trip_id is not null;
+
+alter table public.mate_ride_requests
+  add column if not exists payment_reference text;
+
+create unique index if not exists mate_ride_requests_payment_ref_idx
+  on public.mate_ride_requests (payment_reference)
+  where payment_reference is not null;
+
+-- ─── Verify mate invite payment before sending request ───────────────────────
+create or replace function public.verify_mate_invite_payment(
+  p_reference text,
+  p_trip_id uuid,
+  p_mate_id uuid,
+  p_trip_fare numeric
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  pay public.payment_transactions%rowtype;
+  expected_pesewas integer;
+  trip_pesewas integer;
+begin
+  if p_reference is null or trim(p_reference) = '' then
+    return false;
+  end if;
+
+  select * into pay
+  from public.payment_transactions
+  where reference = trim(p_reference)
+    and status = 'success'
+    and payment_kind = 'mate_invite'
+  limit 1;
+
+  if not found then
+    return false;
+  end if;
+
+  if pay.user_id <> p_mate_id::text then
+    return false;
+  end if;
+
+  if pay.trip_id is distinct from p_trip_id then
+    return false;
+  end if;
+
+  if exists (
+    select 1 from public.mate_ride_requests
+    where payment_reference = pay.reference
+  ) then
+    return false;
+  end if;
+
+  trip_pesewas := round(coalesce(p_trip_fare, 0) * 100)::integer;
+  if trip_pesewas <= 0 then
+    return false;
+  end if;
+
+  expected_pesewas := round(trip_pesewas * 0.08)::integer + 100;
+
+  if pay.amount_in_pesewas <> expected_pesewas then
+    return false;
+  end if;
+
+  return true;
+end;
+$$;
+
+revoke all on function public.verify_mate_invite_payment(text, uuid, uuid, numeric) from public;
+grant execute on function public.verify_mate_invite_payment(text, uuid, uuid, numeric) to authenticated;
+
+-- ─── send_mate_ride_request: require paid invite when trip has a fare ─────────
+create or replace function public.send_mate_ride_request(
+  p_trip_id uuid,
+  p_passenger_id text,
+  p_payment_reference text default null,
+  p_enforce_payment boolean default true
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  t public.trips%rowtype;
+  loc public.passenger_locations%rowtype;
+  rec public.mate_ride_requests%rowtype;
+  pid text := trim(p_passenger_id);
+  v_fare numeric(12, 2) := null;
+  pay_ref text := nullif(trim(p_payment_reference), '');
+begin
+  perform public.expire_stale_mate_ride_requests();
+
+  if uid is null then
+    return jsonb_build_object('ok', false, 'error', 'Not signed in');
+  end if;
+  if pid is null or pid = '' then
+    return jsonb_build_object('ok', false, 'error', 'Passenger ID required');
+  end if;
+
+  select * into t from public.trips where id = p_trip_id for update;
+  if not found or t.mate_id <> uid then
+    return jsonb_build_object('ok', false, 'error', 'Trip not found');
+  end if;
+  if t.status not in ('active', 'full') or t.available_seats <= 0 then
+    return jsonb_build_object('ok', false, 'error', 'No seats available');
+  end if;
+
+  select * into loc from public.passenger_locations where passenger_id = pid;
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'Passenger is not sharing location');
+  end if;
+  if loc.reservation_id is not null then
+    return jsonb_build_object('ok', false, 'error', 'Passenger already has a reservation');
+  end if;
+
+  select coalesce(
+    t.fare_ghs,
+    (
+      select dl.fare_ghs
+      from public.driver_locations dl
+      where dl.mate_id = uid
+      order by dl.updated_at desc nulls last
+      limit 1
+    )
+  )
+  into v_fare;
+
+  if p_enforce_payment and coalesce(v_fare, 0) > 0 then
+    if pay_ref is null then
+      return jsonb_build_object(
+        'ok', false,
+        'error', 'Pay invite fee (8% + GHS 1) before sending this request',
+        'payment_required', true
+      );
+    end if;
+    if not public.verify_mate_invite_payment(pay_ref, p_trip_id, uid, v_fare) then
+      return jsonb_build_object(
+        'ok', false,
+        'error', 'Payment not confirmed — complete MoMo checkout and try again',
+        'payment_required', true
+      );
+    end if;
+  end if;
+
+  update public.mate_ride_requests
+  set status = 'expired'
+  where trip_id = p_trip_id
+    and passenger_id = pid
+    and status = 'pending'
+    and expires_at <= now();
+
+  select * into rec
+  from public.mate_ride_requests
+  where trip_id = p_trip_id
+    and passenger_id = pid
+    and status = 'pending'
+    and expires_at > now()
+  limit 1;
+
+  if found then
+    update public.mate_ride_requests
+    set expires_at = now() + interval '30 minutes',
+        payment_reference = coalesce(payment_reference, pay_ref)
+    where id = rec.id;
+
+    select * into rec from public.mate_ride_requests where id = rec.id;
+
+    return jsonb_build_object('ok', true, 'request', to_jsonb(rec), 'already_sent', true);
+  end if;
+
+  insert into public.mate_ride_requests (
+    trip_id, mate_id, passenger_id, route_label, fare_ghs, status, expires_at, payment_reference
+  )
+  values (
+    t.id,
+    uid,
+    pid,
+    coalesce(t.route, t.origin || ' → ' || t.destination),
+    v_fare,
+    'pending',
+    now() + interval '30 minutes',
+    pay_ref
+  )
+  returning * into rec;
+
+  if pay_ref is not null then
+    update public.payment_transactions
+    set mate_ride_request_id = rec.id,
+        metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('mate_ride_request_id', rec.id)
+    where reference = pay_ref;
+  end if;
+
+  return jsonb_build_object('ok', true, 'request', to_jsonb(rec), 'already_sent', false);
+exception
+  when unique_violation then
+    perform public.expire_stale_mate_ride_requests();
+
+    select * into rec
+    from public.mate_ride_requests
+    where trip_id = p_trip_id
+      and passenger_id = pid
+      and status = 'pending'
+      and expires_at > now()
+    limit 1;
+
+    if found then
+      update public.mate_ride_requests
+      set expires_at = now() + interval '30 minutes',
+          payment_reference = coalesce(payment_reference, pay_ref)
+      where id = rec.id;
+
+      select * into rec from public.mate_ride_requests where id = rec.id;
+
+      return jsonb_build_object('ok', true, 'request', to_jsonb(rec), 'already_sent', true);
+    end if;
+
+    return jsonb_build_object('ok', false, 'error', 'Could not send request');
+  when others then
+    return jsonb_build_object('ok', false, 'error', sqlerrm);
+end;
+$$;
+
+revoke all on function public.send_mate_ride_request(uuid, text, text, boolean) from public;
+grant execute on function public.send_mate_ride_request(uuid, text, text, boolean) to authenticated;
+
+notify pgrst, 'reload schema';
+
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- BEGIN: migrations/010_mate_payouts.sql
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+-- Mate payout requests — mates request MoMo transfer of accumulated earnings.
+-- Admin reviews / approves; server initiates Paystack Transfer on approval.
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'payout_status') then
+    create type public.payout_status as enum ('pending', 'processing', 'paid', 'rejected');
+  end if;
+end $$;
+
+create table if not exists public.mate_payout_requests (
+  id            uuid primary key default gen_random_uuid(),
+  mate_id       uuid not null references auth.users (id) on delete cascade,
+  amount_ghs    numeric(12, 2) not null check (amount_ghs > 0),
+  momo_number   text not null,
+  network       text not null default 'MTN' check (network in ('MTN', 'Vodafone', 'AirtelTigo')),
+  status        public.payout_status not null default 'pending',
+  admin_note    text,
+  paystack_transfer_code text,
+  requested_at  timestamptz not null default now(),
+  processed_at  timestamptz
+);
+
+create index if not exists mate_payout_requests_mate_idx
+  on public.mate_payout_requests (mate_id, requested_at desc);
+
+create index if not exists mate_payout_requests_status_idx
+  on public.mate_payout_requests (status);
+
+alter table public.mate_payout_requests enable row level security;
+
+drop policy if exists "payout: mate reads own" on public.mate_payout_requests;
+create policy "payout: mate reads own"
+  on public.mate_payout_requests for select to authenticated
+  using (mate_id = auth.uid());
+
+drop policy if exists "payout: mate inserts own" on public.mate_payout_requests;
+create policy "payout: mate inserts own"
+  on public.mate_payout_requests for insert to authenticated
+  with check (mate_id = auth.uid());
+
+drop policy if exists "payout: no client update" on public.mate_payout_requests;
+create policy "payout: no client update"
+  on public.mate_payout_requests for update to authenticated
+  using (false);
+
+grant select, insert on public.mate_payout_requests to authenticated;
+grant all on public.mate_payout_requests to service_role;
+
+-- ─── Request payout RPC (rate-limited to 1 pending per mate) ──────────────
+create or replace function public.request_mate_payout(
+  p_amount_ghs numeric,
+  p_momo_number text,
+  p_network text default 'MTN'
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  pending_count integer;
+  min_payout numeric := 5.00;
+  max_payout numeric := 5000.00;
+  network text := upper(trim(p_network));
+begin
+  if uid is null then
+    return jsonb_build_object('ok', false, 'error', 'Not signed in');
+  end if;
+
+  if coalesce(p_amount_ghs, 0) < min_payout then
+    return jsonb_build_object('ok', false, 'error', format('Minimum payout is GHS %s', min_payout));
+  end if;
+  if p_amount_ghs > max_payout then
+    return jsonb_build_object('ok', false, 'error', format('Maximum single payout is GHS %s', max_payout));
+  end if;
+
+  if trim(p_momo_number) = '' or length(trim(p_momo_number)) < 10 then
+    return jsonb_build_object('ok', false, 'error', 'Enter a valid MoMo number (10+ digits)');
+  end if;
+
+  if network not in ('MTN', 'VODAFONE', 'AIRTELTIGO') then
+    network := 'MTN';
+  end if;
+  if network = 'VODAFONE' then network := 'Vodafone'; end if;
+  if network = 'AIRTELTIGO' then network := 'AirtelTigo'; end if;
+
+  select count(*) into pending_count
+  from public.mate_payout_requests
+  where mate_id = uid
+    and status = 'pending';
+
+  if pending_count > 0 then
+    return jsonb_build_object(
+      'ok', false,
+      'error', 'You already have a pending payout request. Wait for it to be processed.'
+    );
+  end if;
+
+  insert into public.mate_payout_requests (
+    mate_id, amount_ghs, momo_number, network, status
+  )
+  values (
+    uid,
+    p_amount_ghs,
+    trim(p_momo_number),
+    network,
+    'pending'
+  );
+
+  return jsonb_build_object('ok', true, 'message', 'Payout request submitted. Processed within 1–2 business days.');
+exception
+  when others then
+    return jsonb_build_object('ok', false, 'error', sqlerrm);
+end;
+$$;
+
+revoke all on function public.request_mate_payout(numeric, text, text) from public;
+grant execute on function public.request_mate_payout(numeric, text, text) to authenticated;
 
 notify pgrst, 'reload schema';
 
@@ -2255,6 +2776,51 @@ NOTIFY pgrst, 'reload schema';
 
 -- Done. Verify Security Advisor → warnings should drop sharply.
 -- If passenger flows fail: confirm app sends header x-device-id (see services/supabase.js).
+
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- BEGIN: FIX_missing_ride_request_rpc.sql
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+-- TrotroOS · Missing passenger mate-invite RPC (safe to re-run)
+-- Paste in Supabase SQL Editor if debug shows get_my_pending_mate_ride_requests missing.
+
+CREATE OR REPLACE FUNCTION public.request_device_id()
+RETURNS text
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT nullif(
+    trim(
+      coalesce(
+        current_setting('request.headers', true)::json->>'x-device-id',
+        current_setting('request.headers', true)::json->>'X-Device-Id',
+        ''
+      )
+    ),
+    ''
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_my_pending_mate_ride_requests()
+RETURNS SETOF public.mate_ride_requests
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT *
+  FROM public.mate_ride_requests
+  WHERE passenger_id = public.request_device_id()
+    AND status = 'pending'
+    AND expires_at > now()
+  ORDER BY created_at DESC;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_my_pending_mate_ride_requests() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_my_pending_mate_ride_requests() TO anon, authenticated;
+
+NOTIFY pgrst, 'reload schema';
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- END TrotroOS_COMPLETE.sql

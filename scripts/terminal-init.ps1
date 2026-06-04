@@ -21,6 +21,7 @@ function global:metro-help {
   Write-Host '  npm run start:phone - tunnel mode if hotspot blocks LAN' -ForegroundColor DarkGray
   Write-Host ''
   Write-Host 'Reload the app: press r in the Metro window only, not in this tab.' -ForegroundColor Yellow
+  Write-Host 'Do not paste Metro log lines here — they are not commands.' -ForegroundColor DarkGray
   Write-Host ''
 }
 

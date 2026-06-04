@@ -89,7 +89,9 @@ Remove-Item Env:CI -ErrorAction SilentlyContinue
 if ($Tunnel) {
   Remove-Item Env:EXPO_OFFLINE -ErrorAction SilentlyContinue
 } else {
-  $env:EXPO_OFFLINE = '1'
+  # Offline skips Expo network checks but breaks manifest asset resolution in Expo Go.
+  Remove-Item Env:EXPO_OFFLINE -ErrorAction SilentlyContinue
+  $env:EXPO_NO_DEPENDENCY_VALIDATION = '1'
 }
 
 & "$PSScriptRoot\show-qr.ps1" -Port $Port -Startup
@@ -97,8 +99,9 @@ if ($Tunnel) {
 if ($Tunnel) {
   Write-Host 'Tunnel mode: phone can scan even if LAN is blocked (needs internet).' -ForegroundColor DarkGray
 } else {
-  Write-Host 'Offline mode: skipping Expo dependency check (normal for local dev).' -ForegroundColor DarkGray
+  Write-Host 'LAN mode: dependency validation skipped (faster start).' -ForegroundColor DarkGray
 }
+Write-Host 'If you see manifest asset warnings: connect this PC to the internet once, then npm run restart.' -ForegroundColor DarkGray
 Write-Host 'Scan with Expo Go app on your phone (not Chrome). Watch for Android Bundled below.' -ForegroundColor DarkGray
 Write-Host ""
 

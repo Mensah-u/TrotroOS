@@ -1,3 +1,4 @@
+import { PAYMENTS_ENABLED } from '@/constants/config';
 import { supabase } from '@/services/supabase';
 
 const TABLE = 'mate_ride_requests';
@@ -51,10 +52,12 @@ export function filterLiveRideRequests(rows) {
   });
 }
 
-export async function sendMateRideRequest(tripId, passengerId) {
+export async function sendMateRideRequest(tripId, passengerId, paymentReference = null) {
   const { data, error } = await supabase.rpc('send_mate_ride_request', {
     p_trip_id: tripId,
     p_passenger_id: passengerId,
+    p_payment_reference: paymentReference ?? null,
+    p_enforce_payment: PAYMENTS_ENABLED,
   });
   if (error) return { data: null, error };
   if (data?.ok === false) return { data: null, error: { message: data.error ?? 'Unable to send request' } };

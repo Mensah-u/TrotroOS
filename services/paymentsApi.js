@@ -13,13 +13,76 @@ import { supabase } from '@/services/supabase';
 const POLL_INTERVAL_MS = 3_000;
 const MAX_POLL_DURATION_MS = 5 * 60_000;
 
+async function initMateInvitePaymentEdge({ mateId, tripId, tripFare, email, passengerId }) {
+  const { data, error } = await supabase.functions.invoke('initialize-mate-invite-payment', {
+    body: { mateId, tripId, tripFare, email, passengerId },
+  });
+
+  if (error) {
+    const msg = error.message ?? 'edge function error';
+    const ctx = error.context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const body = await ctx.json();
+        return { ok: false, error: { message: body?.error ?? msg } };
+      } catch {
+        // fall through
+      }
+    }
+    const status = ctx?.status ?? error?.status;
+    if (status === 404 || /not found|failed to send/i.test(msg)) {
+      return {
+        ok: false,
+        error: {
+          message:
+            'Mate invite payment not deployed. Run npm run deploy:paystack (includes initialize-mate-invite-payment).',
+        },
+      };
+    }
+    return { ok: false, error: { message: msg } };
+  }
+  if (!data?.ok) {
+    return { ok: false, error: { message: data?.error ?? 'init failed' } };
+  }
+  return {
+    ok: true,
+    data: {
+      reference: data.reference,
+      authorizationUrl: data.authorization_url,
+      accessCode: data.access_code,
+      amountInPesewas: data.amount_in_pesewas,
+      breakdown: data.breakdown,
+    },
+  };
+}
+
 async function initPaymentEdge({ userId, seatFare, email, reservationId }) {
   const { data, error } = await supabase.functions.invoke('initialize-payment', {
     body: { userId, seatFare, email, reservationId },
   });
 
   if (error) {
-    return { ok: false, error: { message: error.message ?? 'edge function error' } };
+    const msg = error.message ?? 'edge function error';
+    const ctx = error.context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const body = await ctx.json();
+        return { ok: false, error: { message: body?.error ?? msg } };
+      } catch {
+        // fall through
+      }
+    }
+    const status = ctx?.status ?? error?.status;
+    if (status === 404 || /not found|failed to send/i.test(msg)) {
+      return {
+        ok: false,
+        error: {
+          message:
+            'Payment service not deployed. Run npm run deploy:paystack on your PC (Supabase CLI + PAYSTACK_SECRET_KEY).',
+        },
+      };
+    }
+    return { ok: false, error: { message: msg } };
   }
   if (!data?.ok) {
     return { ok: false, error: { message: data?.error ?? 'init failed' } };
@@ -99,6 +162,41 @@ export async function initPayment({
   });
 }
 
+/**
+ * Initialise Paystack checkout for a mate seat invite (8% + GHS 1).
+ * @param {{ mateId: string, tripId: string, tripFare: number|string, email: string, passengerId?: string }} params
+ */
+export async function initMateInvitePayment({
+  mateId,
+  tripId,
+  tripFare,
+  email,
+  passengerId,
+}) {
+  if (!mateId) return { ok: false, error: { message: 'mateId is required' } };
+  if (!tripId) return { ok: false, error: { message: 'tripId is required' } };
+  if (!email?.trim()) {
+    return { ok: false, error: { message: 'email is required for Paystack' } };
+  }
+  if (tripFare == null) {
+    return { ok: false, error: { message: 'tripFare is required' } };
+  }
+
+  try {
+    const edge = await initMateInvitePaymentEdge({
+      mateId,
+      tripId,
+      tripFare,
+      email: email.trim(),
+      passengerId,
+    });
+    if (edge.ok) return edge;
+    return edge;
+  } catch (e) {
+    return { ok: false, error: { message: e?.message ?? 'mate invite payment failed' } };
+  }
+}
+
 /** Open Paystack checkout in an in-app browser. */
 export async function openPaystackCheckout(authorizationUrl) {
   if (!authorizationUrl) return { ok: false, error: { message: 'no authorization URL' } };
@@ -147,4 +245,4 @@ export async function waitForPaymentConfirmation(reference, opts = {}) {
   return { status: 'timeout' };
 }
 
-export { estimatePaymentTotal } from '@/utils/paymentMath';
+export { estimatePaymentTotal, estimateMateInviteFee } from '@/utils/paymentMath';

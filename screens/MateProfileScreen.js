@@ -19,6 +19,12 @@ import { TAB_BAR_CLEARANCE } from '@/constants/layout';
 import { formatRoute, routes } from '@/constants/routes';
 import { DEFAULT_VEHICLE_TYPE, normalizeVehicleType } from '@/constants/vehicleTypes';
 import { Theme } from '@/constants/theme';
+import { PAYMENTS_ENABLED } from '@/constants/config';
+import {
+  getMatePaymentEmail,
+  isValidMatePaymentEmail,
+  saveMatePaymentEmail,
+} from '@/services/matePaymentEmail';
 import {
   getCurrentMate,
   getMateProfile,
@@ -50,6 +56,7 @@ export default function MateProfileScreen({ navigation, route }) {
   const [defaultRouteId, setDefaultRouteId] = useState(
     findRouteIdByLabel(initialProfile?.default_route),
   );
+  const [momoEmail, setMomoEmail] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -76,6 +83,13 @@ export default function MateProfileScreen({ navigation, route }) {
     };
   }, [initialProfile]);
 
+  useEffect(() => {
+    if (!PAYMENTS_ENABLED) return;
+    getMatePaymentEmail().then((e) => {
+      if (e) setMomoEmail(e);
+    });
+  }, []);
+
   const handleSave = async () => {
     setErrorMsg(null);
     if (!fullName.trim() || !phoneNumber.trim() || !vehicleRegistration.trim()) {
@@ -91,6 +105,11 @@ export default function MateProfileScreen({ navigation, route }) {
         return;
       }
       const selectedRoute = routes.find((r) => r.id === defaultRouteId);
+      if (PAYMENTS_ENABLED && momoEmail.trim() && !isValidMatePaymentEmail(momoEmail)) {
+        setErrorMsg('Enter a valid MoMo / Paystack email for seat-invite fees.');
+        return;
+      }
+
       const { error } = await upsertMateProfile(userData.user.id, {
         full_name: fullName.trim(),
         phone_number: phoneNumber.trim(),
@@ -101,6 +120,9 @@ export default function MateProfileScreen({ navigation, route }) {
       if (error) {
         setErrorMsg(formatSupabaseError(error.message));
         return;
+      }
+      if (PAYMENTS_ENABLED && isValidMatePaymentEmail(momoEmail)) {
+        await saveMatePaymentEmail(momoEmail);
       }
       Alert.alert('Saved', 'Profile updated.', [
         { text: 'OK', onPress: () => navigation.goBack() },
@@ -182,6 +204,18 @@ export default function MateProfileScreen({ navigation, route }) {
             keyboardType="phone-pad"
             textContentType="telephoneNumber"
           />
+          {PAYMENTS_ENABLED ? (
+            <FormInput
+              label="MoMo email (seat invites)"
+              value={momoEmail}
+              onChangeText={setMomoEmail}
+              placeholder="you@example.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="emailAddress"
+            />
+          ) : null}
           <FormInput
             label="Vehicle Registration"
             value={vehicleRegistration}

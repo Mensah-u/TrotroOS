@@ -53,6 +53,10 @@ export const API_KEY = pick('EXPO_PUBLIC_API_KEY', 'apiKey', 'API_KEY');
 
 export const SENTRY_DSN = pick('EXPO_PUBLIC_SENTRY_DSN', 'sentryDsn', 'SENTRY_DSN');
 
+/** Set EXPO_PUBLIC_PAYMENTS_ENABLED=false to skip Paystack during local dev. */
+export const PAYMENTS_ENABLED =
+  pick('EXPO_PUBLIC_PAYMENTS_ENABLED', 'paymentsEnabled', 'PAYMENTS_ENABLED').toLowerCase() !== 'false';
+
 export const PRIVACY_POLICY_URL = pick(
   'EXPO_PUBLIC_PRIVACY_POLICY_URL',
   'privacyPolicyUrl',

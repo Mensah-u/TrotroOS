@@ -58,7 +58,13 @@ import {
   upsertDriverLocation,
   supabase,
 } from '@/services/supabase';
+import MateMoMoEmailModal from '@/components/mate/MateMoMoEmailModal';
+import { PAYMENTS_ENABLED } from '@/constants/config';
 import { sendMateRideRequest, subscribeToTripRideRequests } from '@/services/rideRequests';
+import { MateInvitePaymentError, payForMateInvite } from '@/services/mateInvitePayment';
+import { sendPushToUser } from '@/services/pushNotifications';
+import { getMatePaymentEmail, isValidMatePaymentEmail, saveMatePaymentEmail } from '@/services/matePaymentEmail';
+import { estimateMateInviteFee } from '@/utils/paymentMath';
 import { TAB_FOOTER_CLEARANCE } from '@/constants/layout';
 import {
   DEFAULT_VEHICLE_TYPE,
@@ -139,6 +145,8 @@ function WaitingPassengersPanel({
   pendingIds,
   sendingId,
   seatsLeft,
+  inviteFeeLabel,
+  paymentsEnabled,
 }) {
   if (!passengers?.length) return null;
   const canSend = seatsLeft > 0;
@@ -151,6 +159,11 @@ function WaitingPassengersPanel({
           {passengers.length} waiting your way — send a seat invite
         </Text>
       </View>
+      {paymentsEnabled && inviteFeeLabel ? (
+        <Text style={styles.inviteFeeHint}>
+          Each invite: {inviteFeeLabel} (8% platform + GHS 1 request fee via MoMo)
+        </Text>
+      ) : null}
       <ScrollView
         style={styles.waitingPanelScroll}
         contentContainerStyle={styles.waitingPanelScrollContent}
@@ -180,7 +193,13 @@ function WaitingPassengersPanel({
                   pressed && canSend && !sent && { opacity: 0.85 },
                 ]}>
                 <Text style={styles.waitingSendBtnText}>
-                  {sending ? 'Sending…' : sent ? 'Sent' : 'Send request'}
+                  {sending
+                    ? 'Paying…'
+                    : sent
+                      ? 'Sent'
+                      : paymentsEnabled && inviteFeeLabel
+                        ? `Pay ${inviteFeeLabel}`
+                        : 'Send request'}
                 </Text>
               </Pressable>
             </View>
@@ -854,6 +873,8 @@ function ActiveView({
   onSendRideRequest,
   pendingRequestPassengerIds,
   sendingRequestPassengerId,
+  inviteFeeLabel,
+  paymentsEnabled,
 }) {
   const isFull = trip.seatsLeft === 0;
   const seatColor = getSeatColor(trip.seatsLeft);
@@ -1146,6 +1167,8 @@ function ActiveView({
         pendingIds={pendingRequestPassengerIds}
         sendingId={sendingRequestPassengerId}
         seatsLeft={trip.seatsLeft}
+        inviteFeeLabel={inviteFeeLabel}
+        paymentsEnabled={paymentsEnabled}
       />
 
       <View style={styles.activeControlsSection}>
@@ -1331,10 +1354,12 @@ function ActiveView({
                           ]}>
                           <Text style={styles.calloutRequestBtnText}>
                             {sendingRequestPassengerId === p.passenger_id
-                              ? 'Sending…'
+                              ? 'Paying…'
                               : pendingRequestPassengerIds?.has?.(p.passenger_id)
                                 ? 'Request sent'
-                                : 'Send seat request'}
+                                : paymentsEnabled && inviteFeeLabel
+                                  ? `Pay ${inviteFeeLabel}`
+                                  : 'Send seat request'}
                           </Text>
                         </Pressable>
                       ) : null}
@@ -1397,6 +1422,8 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
   const [pendingRequestPassengerIds, setPendingRequestPassengerIds] = useState(() => new Set());
   const [sendingRequestPassengerId, setSendingRequestPassengerId] = useState(null);
   const [scheduledDemand, setScheduledDemand] = useState([]);
+  const [momoEmailModal, setMomoEmailModal] = useState(null);
+  const pendingInviteRef = useRef(null);
 
   const locationSubRef = useRef(null);
   const reservationSubRef = useRef(null);
@@ -1446,27 +1473,126 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
     rideRequestSubRef.current = ch;
   }, [stopRideRequestSubscription]);
 
+  const completeInviteSend = useCallback(async (passenger, paymentReference) => {
+    const current = tripRef.current;
+    const pid = passenger?.passenger_id;
+    if (!current?.tripId || !pid) return;
+
+    const { data, error } = await sendMateRideRequest(
+      current.tripId,
+      pid,
+      paymentReference ?? null,
+    );
+    if (error) {
+      Alert.alert('Unable to send request', formatSupabaseError(error.message));
+      return;
+    }
+    setPendingRequestPassengerIds((prev) => new Set(prev).add(pid));
+    if (!data?.already_sent) {
+      hapticSuccess();
+      Alert.alert('Request sent', 'The passenger will receive your seat invitation.');
+      // Push to passenger
+      const routeLabel = tripRef.current?.route
+        ? `${tripRef.current.route.origin ?? ''} → ${tripRef.current.route.destination ?? ''}`
+        : 'your route';
+      sendPushToUser({
+        recipientId: pid,
+        title: 'Seat invitation',
+        body: `A mate is heading your way on ${routeLabel}. Tap to reserve your seat!`,
+        data: { type: 'seat_invite', tripId: tripRef.current?.tripId ?? null },
+      });
+    }
+  }, []);
+
+  const runPaidInviteFlow = useCallback(async (passenger, email) => {
+    const current = tripRef.current;
+    const pid = passenger?.passenger_id;
+    const tripFareGhs = Number(
+      current?.fareGhs ?? resolveMateRouteFare(current?.route) ?? 0,
+    );
+    if (!mateId || !current?.tripId || !pid) return;
+
+    const breakdown = estimateMateInviteFee(tripFareGhs);
+    if (!breakdown) {
+      Alert.alert('Set trip fare', 'Set your seat price on this trip before sending paid invites.');
+      return;
+    }
+
+    await saveMatePaymentEmail(email);
+
+    setSendingRequestPassengerId(pid);
+    try {
+      const pay = await payForMateInvite({
+        mateId,
+        tripId: current.tripId,
+        tripFareGhs,
+        email,
+        passengerId: pid,
+        onPhase: (phase) => {
+          if (phase === 'confirming') setSendingRequestPassengerId(pid);
+        },
+      });
+
+      await completeInviteSend(passenger, pay.skipped ? null : pay.reference);
+    } catch (e) {
+      const msg = e instanceof MateInvitePaymentError
+        ? e.message
+        : e?.message ?? 'Payment failed';
+      Alert.alert('Invite payment', msg);
+    } finally {
+      setSendingRequestPassengerId(null);
+    }
+  }, [mateId, completeInviteSend]);
+
   const sendRideRequest = useCallback(async (passenger) => {
     const current = tripRef.current;
     const pid = passenger?.passenger_id;
     if (!current?.tripId || !pid || current.seatsLeft <= 0) return;
 
-    setSendingRequestPassengerId(pid);
-    try {
-      const { data, error } = await sendMateRideRequest(current.tripId, pid);
-      if (error) {
-        Alert.alert('Unable to send request', formatSupabaseError(error.message));
+    const tripFareGhs = Number(
+      current?.fareGhs ?? resolveMateRouteFare(current?.route) ?? 0,
+    );
+
+    if (PAYMENTS_ENABLED && tripFareGhs > 0) {
+      const breakdown = estimateMateInviteFee(tripFareGhs);
+      if (!breakdown) {
+        Alert.alert('Set trip fare', 'Set your seat price before sending invites.');
         return;
       }
-      setPendingRequestPassengerIds((prev) => new Set(prev).add(pid));
-      if (!data?.already_sent) {
-        hapticSuccess();
-        Alert.alert('Request sent', 'The passenger will receive your seat invitation.');
+
+      const proceed = await new Promise((resolve) => {
+        Alert.alert(
+          'Pay to send invite',
+          `Platform fee (8%): GHS ${breakdown.platformFeeGhs}\n`
+            + `Request fee: GHS ${breakdown.requestFeeGhs}\n`
+            + `Total: GHS ${breakdown.totalGhs}\n\n`
+            + 'You must complete MoMo payment before the passenger is notified.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Pay & send', onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (!proceed) return;
+
+      let email = await getMatePaymentEmail();
+      if (!isValidMatePaymentEmail(email)) {
+        pendingInviteRef.current = passenger;
+        setMomoEmailModal(' ');
+        return;
       }
+
+      await runPaidInviteFlow(passenger, email);
+      return;
+    }
+
+    setSendingRequestPassengerId(pid);
+    try {
+      await completeInviteSend(passenger, null);
     } finally {
       setSendingRequestPassengerId(null);
     }
-  }, []);
+  }, [runPaidInviteFlow, completeInviteSend]);
 
   const applyPassengerLocations = useCallback((locs) => {
     setIdleDemand(buildDemandFromLocations(locs));
@@ -2043,6 +2169,25 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
 
   const defaultRouteId = findRouteIdByLabel(profile?.default_route);
 
+  const inviteFeeLabel = useMemo(() => {
+    if (!PAYMENTS_ENABLED || !trip) return null;
+    const fare = Number(trip.fareGhs ?? resolveMateRouteFare(trip.route) ?? 0);
+    const b = estimateMateInviteFee(fare);
+    return b ? `GHS ${b.totalGhs}` : null;
+  }, [trip]);
+
+  const handleMomoEmailSubmit = useCallback(async (email) => {
+    const passenger = pendingInviteRef.current;
+    setMomoEmailModal(null);
+    pendingInviteRef.current = null;
+    if (!passenger) return;
+    if (!isValidMatePaymentEmail(email)) {
+      Alert.alert('Invalid email', 'Enter a valid email for MoMo checkout.');
+      return;
+    }
+    await runPaidInviteFlow(passenger, email.trim().toLowerCase());
+  }, [runPaidInviteFlow]);
+
   if (!mateId) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
@@ -2136,9 +2281,21 @@ export default function Dashboard({ profile, mateId: mateIdProp, onOpenProfile, 
             onSendRideRequest={sendRideRequest}
             pendingRequestPassengerIds={pendingRequestPassengerIds}
             sendingRequestPassengerId={sendingRequestPassengerId}
+            inviteFeeLabel={inviteFeeLabel}
+            paymentsEnabled={PAYMENTS_ENABLED}
           />
         ) : null}
       </View>
+
+      <MateMoMoEmailModal
+        visible={momoEmailModal !== null}
+        initialEmail={typeof momoEmailModal === 'string' ? momoEmailModal : ''}
+        onCancel={() => {
+          setMomoEmailModal(null);
+          pendingInviteRef.current = null;
+        }}
+        onSubmit={handleMomoEmailSubmit}
+      />
     </SafeAreaView>
     </PremiumBackground>
   );
@@ -2455,6 +2612,13 @@ const styles = StyleSheet.create({
   },
   waitingPanelHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   waitingPanelTitle: { color: C.PASSENGER_MAP, fontSize: 12, fontWeight: '800', flex: 1 },
+  inviteFeeHint: {
+    color: C.TEXT_MUTED,
+    fontSize: 11,
+    lineHeight: 16,
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
   waitingPanelScroll: { maxHeight: 96 },
   waitingPanelScrollContent: { gap: 6, paddingBottom: 2 },
   waitingRow: {

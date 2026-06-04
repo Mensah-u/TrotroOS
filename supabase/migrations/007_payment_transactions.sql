@@ -38,6 +38,7 @@ end $$;
 
 create table if not exists public.payment_transactions (
   id                 uuid primary key default gen_random_uuid(),
+  -- TrotroOS passengers: user_id = passenger_profiles.device_id (device-scoped profile)
   user_id            text not null
                        references public.passenger_profiles (device_id)
                        on delete restrict,

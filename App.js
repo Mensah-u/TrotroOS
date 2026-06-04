@@ -17,6 +17,7 @@ import WebAppShell from './components/WebAppShell';
 import { I18nProvider } from './context/I18nContext';
 import { loadStaticData, refreshStaticData } from './services/staticData';
 import { initMonitoring, recordEvent, recordError, setUser, wrapAppWithMonitoring } from './services/monitoring';
+import { autoRegisterPush, resetPushRegistration } from './services/pushNotifications';
 import { getOrCreateDeviceId } from './services/passengerProfile';
 import { parseAppDeepLink } from './services/shareLinks';
 import { setPendingRidePrefill } from './services/deepLinkStore';
@@ -302,6 +303,25 @@ function AppRoot() {
     if (session.phase !== 'loading') {
       SplashScreen.hideAsync().catch(() => {});
     }
+  }, [session.phase]);
+
+  useEffect(() => {
+    if (session.phase !== 'app' || !session.role) return;
+    (async () => {
+      const deviceId = await import('./services/passengerProfile')
+        .then((m) => m.getOrCreateDeviceId())
+        .catch(() => null);
+      const userId = session.role === ROLES.MATE
+        ? (await import('./services/supabase').then((m) => m.supabase.auth.getUser()).catch(() => null))?.data?.user?.id ?? deviceId
+        : deviceId;
+      if (userId) {
+        autoRegisterPush({ userId, userRole: session.role });
+      }
+    })();
+  }, [session.phase, session.role]);
+
+  useEffect(() => {
+    if (session.phase === 'welcome') resetPushRegistration();
   }, [session.phase]);
 
   useEffect(() => {

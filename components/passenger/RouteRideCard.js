@@ -3,8 +3,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Theme, getSeatStatus, glowShadow } from '@/constants/theme';
+import { PAYMENTS_ENABLED } from '@/constants/config';
 import { getVehicleIcon } from '@/constants/vehicleTypes';
 import { formatDistance } from '@/utils/rideEta';
+import { estimatePaymentTotal } from '@/utils/paymentMath';
 import { hapticSelect } from '@/utils/haptics';
 
 const C = {
@@ -114,7 +116,12 @@ export default function RouteRideCard({
               <Text style={styles.routeTo} numberOfLines={1}>{trip.destination}</Text>
               {trip.isLive ? <View style={[styles.livePulse, { backgroundColor: dot }]} /> : null}
             </View>
-            <Text style={styles.fareInline} numberOfLines={1}>{trip.fare} · pay on board</Text>
+            <Text style={styles.fareInline} numberOfLines={1}>
+              {trip.fare}
+              {PAYMENTS_ENABLED && trip.fareGhs > 0 && estimatePaymentTotal(trip.fareGhs)
+                ? ` · MoMo GHS ${estimatePaymentTotal(trip.fareGhs).totalGhs}`
+                : ' · pay on board'}
+            </Text>
             {waitingCount > 0 ? (
               <View style={styles.demandChip}>
                 <Ionicons name="people" size={11} color="#FBBF24" />

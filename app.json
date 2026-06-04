@@ -2,7 +2,7 @@
   "expo": {
     "name": "TrotroOS",
     "slug": "TrotroOSv2",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "trotrops",
@@ -14,7 +14,7 @@
     },
     "android": {
       "package": "com.trotro.os",
-      "versionCode": 8,
+      "versionCode": 9,
       "adaptiveIcon": {
         "backgroundColor": "#121212",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

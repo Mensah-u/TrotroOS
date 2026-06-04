@@ -68,6 +68,8 @@ module.exports = () => ({
     sentryDsn,
     apiBaseUrl: pick('EXPO_PUBLIC_API_BASE_URL', secrets, 'API_BASE_URL'),
     apiKey: pick('EXPO_PUBLIC_API_KEY', secrets, 'API_KEY'),
+    paymentsEnabled:
+      pick('EXPO_PUBLIC_PAYMENTS_ENABLED', secrets, 'PAYMENTS_ENABLED') || 'true',
   },
   android: {
     ...base.expo.android,

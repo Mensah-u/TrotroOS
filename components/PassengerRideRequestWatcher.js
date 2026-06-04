@@ -10,8 +10,13 @@ import {
   subscribeToPassengerRideRequests,
 } from '@/services/rideRequests';
 import { emitMateRideAccepted, emitMateRideInvite } from '@/services/rideRequestBus';
-import { getActiveReservation, setSupabaseDeviceId, supabase } from '@/services/supabase';
+import { getActiveReservation, setSupabaseDeviceId, supabase, cancelReservation } from '@/services/supabase';
+import { scheduleLocalNotification } from '@/services/pushNotifications';
 import { formatSupabaseError } from '@/utils/supabaseErrors';
+import { PAYMENTS_ENABLED } from '@/constants/config';
+import { BookingPaymentError, payForReservation } from '@/services/bookingPayment';
+import { getPaymentEmail } from '@/services/passengerPaymentEmail';
+import { estimatePaymentTotal } from '@/utils/paymentMath';
 
 const POLL_MS = 5_000;
 
@@ -80,20 +85,72 @@ export default function PassengerRideRequestWatcher() {
             clearShowing();
             const pid = deviceIdRef.current;
             if (!pid) return;
+
+            const fareGhs = Number(req.fare_ghs ?? req.trips?.fare_ghs ?? 0);
+            const breakdown = PAYMENTS_ENABLED && fareGhs > 0
+              ? estimatePaymentTotal(fareGhs)
+              : null;
+
+            let email = '';
+            if (breakdown) {
+              email = await getPaymentEmail();
+              if (!email) {
+                Alert.alert(
+                  'MoMo email needed',
+                  'Open Find Ride, tap any trip, and enter your Paystack email once. Then accept mate invites to pay automatically.',
+                );
+                return;
+              }
+            } else if (PAYMENTS_ENABLED && fareGhs <= 0) {
+              Alert.alert('Fare not set', 'This invite has no fare yet. Ask the mate to set trip pricing.');
+              return;
+            }
+
             const { data, error } = await respondMateRideRequest(req.id, pid, true);
             if (error) {
               Alert.alert('Reservation failed', formatSupabaseError(error.message));
               return;
             }
-            handledRef.current.add(req.id);
-            hasReservationRef.current = true;
+
             const res = data?.reservation;
             const tripId = data?.trip_id ?? req.trip_id ?? req.trips?.id;
+
+            if (breakdown && res?.id) {
+              try {
+                await payForReservation({
+                  userId: pid,
+                  seatFareGhs: fareGhs,
+                  email,
+                  reservationId: res.id,
+                });
+              } catch (payErr) {
+                if (res?.id) {
+                  await cancelReservation(res.id, pid).catch(() => {});
+                }
+                Alert.alert(
+                  'Payment required',
+                  payErr instanceof BookingPaymentError
+                    ? payErr.message
+                    : 'Payment could not be completed',
+                );
+                return;
+              }
+            }
+
+            handledRef.current.add(req.id);
+            hasReservationRef.current = true;
             if (res?.id) {
               await saveActiveReservationCache({
                 reservationId: res.id,
                 tripId: tripId ?? null,
               }).catch(() => {});
+
+              // Local expiry warning 5 min before (reservations last 30 min)
+              scheduleLocalNotification(
+                'Seat reservation expiring soon',
+                'Your reserved seat expires in 5 minutes — open TrotroOS to check.',
+                25 * 60,
+              );
             }
             emitMateRideAccepted({ request: req, reservation: res, tripId });
           },

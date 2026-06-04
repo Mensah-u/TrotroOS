@@ -23,6 +23,7 @@ Run these **once** in Supabase Dashboard → SQL Editor, in order. Each file is 
 | 17 | `FIX_v14_features.sql` | v1.4 feature flags / columns |
 | 18 | `FIX_trips_foreign_key.sql` | FK integrity |
 | 19 | `migrations/007_payment_transactions.sql` | Paystack MoMo `payment_transactions` table |
+| 20 | `migrations/008_payment_reservation_link.sql` | `reservations.payment_reference` after Paystack success |
 
 ## After applying
 

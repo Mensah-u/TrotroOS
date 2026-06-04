@@ -12,7 +12,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import PremiumButton from '@/components/PremiumButton';
+import { FormInput } from '@/components/FormInput';
 import { PASSENGER } from '@/constants/problemSolution';
+import { PAYMENTS_ENABLED } from '@/constants/config';
 import { Theme, glowShadow } from '@/constants/theme';
 import { getVehicleIcon } from '@/constants/vehicleTypes';
 import { estimateTripDuration, formatDistance } from '@/utils/rideEta';
@@ -59,6 +61,11 @@ export default function RideDetailsSheet({
   onTrackMap,
   reserving = false,
   reserveReady = true,
+  reserveLabel,
+  paymentsEnabled = PAYMENTS_ENABLED,
+  paymentBreakdown = null,
+  paymentEmail = '',
+  onPaymentEmailChange,
   pickupEta,
   routeMeta,
 }) {
@@ -204,9 +211,73 @@ export default function RideDetailsSheet({
                     valueColor={driverLive ? Theme.colors.success : Theme.colors.gold}
                   />
                 ) : null}
-                <DetailRow icon="card-outline" label="Payment" value="Cash or MoMo to mate when you board" />
+                {paymentsEnabled && !isActive ? (
+                  paymentBreakdown ? (
+                    <>
+                      <DetailRow
+                        icon="wallet-outline"
+                        label="Seat fare"
+                        value={`GHS ${paymentBreakdown.seatFareGhs}`}
+                      />
+                      <DetailRow
+                        icon="pie-chart-outline"
+                        label="Platform fee (8%)"
+                        value={`GHS ${paymentBreakdown.platformFeeGhs}`}
+                      />
+                      <DetailRow
+                        icon="paper-plane-outline"
+                        label="Request fee"
+                        value={`GHS ${paymentBreakdown.requestFeeGhs}`}
+                      />
+                      <DetailRow
+                        icon="phone-portrait-outline"
+                        label="Pay now (MoMo / card)"
+                        value={`GHS ${paymentBreakdown.totalGhs} via Paystack`}
+                        valueColor={Theme.colors.passenger}
+                      />
+                    </>
+                  ) : (
+                    <DetailRow
+                      icon="phone-portrait-outline"
+                      label="MoMo checkout"
+                      value="Waiting for mate fare on this trip — cannot pay until fare is set"
+                      valueColor={Theme.colors.gold}
+                    />
+                  )
+                ) : (
+                  <DetailRow
+                    icon="card-outline"
+                    label="Payment"
+                    value={
+                      isActive
+                        ? 'Paid online · cash change optional on board'
+                        : paymentsEnabled
+                          ? 'Secure MoMo checkout when you reserve'
+                          : 'Cash or MoMo to mate when you board'
+                    }
+                  />
+                )}
               </View>
             </View>
+
+            {paymentsEnabled && !isActive ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>MOBILE MONEY EMAIL</Text>
+                <Text style={styles.emailHint}>
+                  Paystack sends your receipt here. Use the email linked to your MoMo wallet if you have one.
+                </Text>
+                <FormInput
+                  label="Email"
+                  value={paymentEmail}
+                  onChangeText={onPaymentEmailChange}
+                  placeholder="you@example.com"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  accentColor={Theme.colors.passenger}
+                />
+              </View>
+            ) : null}
           </ScrollView>
 
           {/* Actions */}
@@ -231,13 +302,21 @@ export default function RideDetailsSheet({
                       ? 'Trip full'
                       : !reserveReady
                         ? 'Loading profile…'
-                        : PASSENGER.reserveSheetCta
+                        : reserveLabel
+                          ?? (paymentsEnabled && paymentBreakdown
+                            ? `Pay GHS ${paymentBreakdown.totalGhs} & reserve`
+                            : PASSENGER.reserveSheetCta)
                   }
                   variant="passenger"
-                  disabled={isFull || reserving || !reserveReady}
+                  disabled={
+                    isFull
+                    || reserving
+                    || !reserveReady
+                    || (paymentsEnabled && paymentBreakdown && !paymentEmail?.trim())
+                  }
                   loading={reserving || !reserveReady}
                   onPress={onReserve}
-                  icon={<Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />}
+                  icon={<Ionicons name="phone-portrait-outline" size={20} color="#FFFFFF" />}
                 />
                 <Pressable onPress={onClose} style={styles.cancelBtn}>
                   <Text style={styles.cancelBtnText}>Close</Text>
@@ -310,6 +389,12 @@ const styles = StyleSheet.create({
 
   section: { marginBottom: 20 },
   sectionTitle: { color: Theme.colors.textMuted, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 10 },
+  emailHint: {
+    color: Theme.colors.textSub,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 8,
+  },
   mateCard: {
     flexDirection: 'row',
     alignItems: 'center',

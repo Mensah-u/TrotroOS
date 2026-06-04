@@ -11,11 +11,12 @@ import {
   setPassengerOnboarded,
 } from '@/services/appRole';
 import { subscribeToAuthUrls } from '@/services/authDeepLink';
-import { getMateSession, signOutMate, supabase } from '@/services/supabase';
+import { clearStaleAuthSession, getMateSession, signOutMate, supabase } from '@/services/supabase';
 
 const BOOTSTRAP_MAX_MS = 4000;
 
 async function runBootstrap() {
+  await clearStaleAuthSession();
   let savedRole = await getAppRole();
   if (Platform.OS === 'web' && savedRole === ROLES.MATE) {
     await setAppRole(ROLES.PASSENGER);

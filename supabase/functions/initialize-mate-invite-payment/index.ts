@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 
 import { verifyUserAccess } from '../_shared/auth.ts';
 import {
-  computePaymentBreakdown,
+  computeMateInviteBreakdown,
   generatePaystackReference,
   parseSeatFareInput,
 } from '../_shared/paymentMath.ts';
@@ -13,11 +13,18 @@ import {
   getServiceClient,
   jsonResponse,
 } from '../_shared/supabaseAdmin.ts';
-import type { InitializePaymentBody } from '../_shared/types.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type Body = {
+  mateId?: string;
+  tripId?: string;
+  tripFare?: number | string;
+  email?: string;
+  passengerId?: string;
+};
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -28,96 +35,82 @@ serve(async (req) => {
     return errorResponse('Method not allowed', 405);
   }
 
-  let body: InitializePaymentBody;
+  let body: Body;
   try {
     body = await req.json();
   } catch {
     return errorResponse('Invalid JSON body');
   }
 
-  const userId = body.userId?.trim();
+  const mateId = body.mateId?.trim();
+  const tripId = body.tripId?.trim();
   const email = body.email?.trim().toLowerCase();
+  const passengerId = body.passengerId?.trim() ?? null;
 
-  if (!userId) return errorResponse('userId is required');
+  if (!mateId) return errorResponse('mateId is required');
+  if (!tripId || !UUID_RE.test(tripId)) return errorResponse('tripId must be a valid UUID');
   if (!email || !EMAIL_RE.test(email)) return errorResponse('A valid email is required');
 
-  if (body.reservationId && !UUID_RE.test(body.reservationId)) {
-    return errorResponse('reservationId must be a valid UUID');
-  }
-
-  const accessError = await verifyUserAccess(req, userId, async (token) => {
+  const accessError = await verifyUserAccess(req, mateId, async (token) => {
     const supabase = getServiceClient();
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data.user) return { user: null };
     return { user: data.user };
   });
   if (accessError) {
-    console.error('[initialize-payment] auth failed:', accessError);
+    console.error('[initialize-mate-invite-payment] auth failed:', accessError);
     return errorResponse(accessError, 403);
   }
 
-  const parsedFare = parseSeatFareInput(body.seatFare);
+  const parsedFare = parseSeatFareInput(body.tripFare);
   if (!parsedFare.ok) return errorResponse(parsedFare.error);
 
-  const breakdown = computePaymentBreakdown(parsedFare.seatPesewas);
-  const reference = generatePaystackReference();
+  const breakdown = computeMateInviteBreakdown(parsedFare.seatPesewas);
+  const reference = generatePaystackReference('mate_invite');
 
   const supabase = getServiceClient();
 
-  const { data: profile, error: profileError } = await supabase
-    .from('passenger_profiles')
-    .select('device_id')
-    .eq('device_id', userId)
+  const { data: trip, error: tripError } = await supabase
+    .from('trips')
+    .select('id, mate_id, status, available_seats, fare_ghs')
+    .eq('id', tripId)
     .maybeSingle();
 
-  if (profileError) {
-    console.error('[initialize-payment] profile lookup failed:', profileError.message);
-    return errorResponse('Could not verify user', 500);
+  if (tripError) {
+    console.error('[initialize-mate-invite-payment] trip lookup failed:', tripError.message);
+    return errorResponse('Could not verify trip', 500);
   }
-  if (!profile) {
-    return errorResponse('Unknown user — create a passenger profile first', 404);
+  if (!trip) return errorResponse('Trip not found', 404);
+  if (trip.mate_id !== mateId) {
+    return errorResponse('Trip does not belong to this mate', 403);
   }
-
-  if (body.reservationId) {
-    const { data: reservation, error: resError } = await supabase
-      .from('reservations')
-      .select('id, passenger_id, status')
-      .eq('id', body.reservationId)
-      .maybeSingle();
-
-    if (resError) {
-      console.error('[initialize-payment] reservation lookup failed:', resError.message);
-      return errorResponse('Could not verify reservation', 500);
-    }
-    if (!reservation) {
-      return errorResponse('Reservation not found', 404);
-    }
-    if (reservation.passenger_id !== userId) {
-      return errorResponse('Reservation does not belong to this user', 403);
-    }
-    if (reservation.status !== 'active') {
-      return errorResponse('Reservation is not active', 409);
-    }
+  if (!['active', 'full'].includes(trip.status) || (trip.available_seats ?? 0) <= 0) {
+    return errorResponse('Trip has no seats available', 409);
   }
 
   const { error: insertError } = await supabase.from('payment_transactions').insert({
-    user_id: userId,
+    user_id: mateId,
     reference,
     amount_in_pesewas: breakdown.amountInPesewas,
-    seat_fare: breakdown.seatFareGhs,
+    seat_fare: breakdown.tripFareGhs,
     platform_fee: breakdown.platformFeeGhs,
     request_fee: breakdown.requestFeeGhs,
     status: 'pending',
-    reservation_id: body.reservationId ?? null,
+    payment_kind: 'mate_invite',
+    trip_id: tripId,
+    reservation_id: null,
     metadata: {
       email,
+      payment_kind: 'mate_invite',
+      trip_id: tripId,
+      passenger_id: passengerId,
       breakdown,
-      source: 'initialize-payment',
+      source: 'initialize-mate-invite-payment',
     },
   });
 
   if (insertError) {
-    console.error('[initialize-payment] insert failed:', insertError.message);
+    console.error('[initialize-mate-invite-payment] insert failed:', insertError.message);
     return errorResponse('Could not create transaction record', 500);
   }
 
@@ -128,9 +121,11 @@ serve(async (req) => {
       reference,
       channels: ['mobile_money', 'card'],
       metadata: {
-        userId,
-        reservationId: body.reservationId ?? null,
-        seatFareGhs: breakdown.seatFareGhs,
+        mateId,
+        tripId,
+        passengerId,
+        paymentKind: 'mate_invite',
+        tripFareGhs: breakdown.tripFareGhs,
         platformFeeGhs: breakdown.platformFeeGhs,
         requestFeeGhs: breakdown.requestFeeGhs,
         totalGhs: breakdown.totalGhs,
@@ -143,15 +138,6 @@ serve(async (req) => {
       .update({ paystack_access_code: paystack.accessCode })
       .eq('reference', reference);
 
-    console.log(
-      '[initialize-payment] pending',
-      reference,
-      breakdown.amountInPesewas,
-      'pesewas',
-      breakdown.totalGhs,
-      'GHS',
-    );
-
     return jsonResponse({
       ok: true,
       reference: paystack.reference,
@@ -159,7 +145,7 @@ serve(async (req) => {
       access_code: paystack.accessCode,
       amount_in_pesewas: breakdown.amountInPesewas,
       breakdown: {
-        seat_fare: breakdown.seatFareGhs,
+        trip_fare: breakdown.tripFareGhs,
         platform_fee: breakdown.platformFeeGhs,
         request_fee: breakdown.requestFeeGhs,
         total: breakdown.totalGhs,
@@ -167,23 +153,11 @@ serve(async (req) => {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Paystack initialization failed';
-    console.error('[initialize-payment] paystack error:', message);
-
-    const { data: existing } = await supabase
-      .from('payment_transactions')
-      .select('metadata')
-      .eq('reference', reference)
-      .maybeSingle();
+    console.error('[initialize-mate-invite-payment] paystack error:', message);
 
     await supabase
       .from('payment_transactions')
-      .update({
-        status: 'failed',
-        metadata: {
-          ...(typeof existing?.metadata === 'object' && existing.metadata ? existing.metadata : {}),
-          paystack_init_error: message,
-        },
-      })
+      .update({ status: 'failed' })
       .eq('reference', reference);
 
     return errorResponse(message, 502);

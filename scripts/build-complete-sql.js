@@ -18,10 +18,15 @@ const FILES = [
   'FIX_mate_ride_requests.sql',
   'FIX_mate_reservations.sql',
   'FIX_nearby_indexes.sql',
+  'FIX_payments_and_wallet.sql',
   'migrations/007_payment_transactions.sql',
+  'migrations/008_payment_reservation_link.sql',
+  'migrations/009_mate_invite_payments.sql',
+  'migrations/010_mate_payouts.sql',
   'FIX_reservations_passenger_id_alter.sql',
   'FIX_baseline_rls_policies.sql',
   'FIX_security_hardening.sql',
+  'FIX_missing_ride_request_rpc.sql',
 ];
 
 const header = `-- ═══════════════════════════════════════════════════════════════════════════

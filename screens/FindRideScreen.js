@@ -27,6 +27,7 @@ import PassengerProblemBanner from '@/components/passenger/PassengerProblemBanne
 import EmptyState from '@/components/EmptyState';
 import TripCardSkeleton from '@/components/passenger/TripCardSkeleton';
 import { PASSENGER } from '@/constants/problemSolution';
+import { PAYMENTS_ENABLED } from '@/constants/config';
 import { findRouteByPlaces, formatRoute, getPlaceCoords, getPickupStopsForRoute, routes } from '@/constants/routes';
 import { filterLaunchRoutes } from '@/constants/corridor';
 import { VEHICLE_TYPES, vehicleMatchesFilter } from '@/constants/vehicleTypes';
@@ -76,6 +77,9 @@ import {
 } from '@/services/supabase';
 import { subscribeMateRideAccepted } from '@/services/rideRequestBus';
 import { buildDemandFromLocations } from '@/utils/passengerDemand';
+import { BookingPaymentError, payForReservation } from '@/services/bookingPayment';
+import { getPaymentEmail, savePaymentEmail } from '@/services/passengerPaymentEmail';
+import { estimatePaymentTotal } from '@/utils/paymentMath';
 import { C } from '@/constants/theme';
 
 const DEMAND_POLL_MS = 5000;
@@ -148,6 +152,8 @@ export default function FindRideScreen({ navigation }) {
   const [vehicleFilter,       setVehicleFilter]       = useState(null);
   const [dismissedTripIds,    setDismissedTripIds]    = useState(() => new Set());
   const [resultsBootstrapped, setResultsBootstrapped] = useState(false);
+  const [paymentEmail,        setPaymentEmail]        = useState('');
+  const [paymentPhase,        setPaymentPhase]        = useState(null);
 
   const [demandByRoute,  setDemandByRoute] = useState({});
   const [mateAverages,   setMateAverages]  = useState({});
@@ -172,6 +178,30 @@ export default function FindRideScreen({ navigation }) {
     isWaiting,
     queuedRouteLabel,
   });
+
+  useEffect(() => {
+    getPaymentEmail().then((email) => {
+      if (mountedRef.current && email) setPaymentEmail(email);
+    }).catch(() => {});
+  }, []);
+
+  const sheetPaymentBreakdown = useMemo(() => {
+    const trip = rideSheet?.trip;
+    if (!trip || !PAYMENTS_ENABLED) return null;
+    const fareGhs =
+      trip.fareGhs ??
+      resolveTripFareGhs(trip, { allowCatalogFallback: true });
+    if (fareGhs == null || fareGhs <= 0) return null;
+    return estimatePaymentTotal(fareGhs);
+  }, [rideSheet?.trip]);
+
+  const reserveProgressLabel = useMemo(() => {
+    if (!paymentPhase) return null;
+    if (paymentPhase === 'initializing') return 'Starting payment…';
+    if (paymentPhase === 'checkout') return 'Complete MoMo in browser…';
+    if (paymentPhase === 'confirming') return 'Confirming payment…';
+    return 'Reserving…';
+  }, [paymentPhase]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -715,7 +745,38 @@ export default function FindRideScreen({ navigation }) {
       return;
     }
 
+    const seatFareGhs =
+      trip.fareGhs ??
+      resolveTripFareGhs(trip, { allowCatalogFallback: true });
+    const breakdown = PAYMENTS_ENABLED && seatFareGhs
+      ? estimatePaymentTotal(seatFareGhs)
+      : null;
+
+    if (PAYMENTS_ENABLED && !breakdown) {
+      Alert.alert(
+        'Fare not set',
+        'This trip does not have a fare yet. Choose another ride or wait for the mate to set pricing.',
+      );
+      return;
+    }
+
+    if (PAYMENTS_ENABLED && breakdown && !paymentEmail.trim()) {
+      Alert.alert('Email required', 'Enter the email for your Paystack Mobile Money receipt.');
+      return;
+    }
+
+    if (PAYMENTS_ENABLED && breakdown) {
+      const saved = await savePaymentEmail(paymentEmail);
+      if (!saved.ok) {
+        Alert.alert('Invalid email', saved.error);
+        return;
+      }
+    }
+
     setReserving(true);
+    setPaymentPhase(null);
+
+    let resId = null;
 
     try {
       const { data: resData, error: resError } = await createReservation(trip.tripId, passengerId);
@@ -724,8 +785,35 @@ export default function FindRideScreen({ navigation }) {
         return;
       }
 
-      const resId = resData?.id ?? null;
-      const snapshot = { ...trip, reservationId: resId, expiresAt: resData?.expires_at };
+      resId = resData?.id ?? null;
+
+      if (PAYMENTS_ENABLED && breakdown && resId) {
+        try {
+          await payForReservation({
+            userId: passengerId,
+            seatFareGhs,
+            email: paymentEmail.trim().toLowerCase(),
+            reservationId: resId,
+            onPhase: (phase) => {
+              if (mountedRef.current) setPaymentPhase(phase);
+            },
+          });
+        } catch (payErr) {
+          await cancelReservation(resId, passengerId).catch(() => {});
+          const msg = payErr instanceof BookingPaymentError
+            ? payErr.message
+            : 'Payment could not be completed';
+          Alert.alert('Payment required', msg);
+          return;
+        }
+      }
+
+      const snapshot = {
+        ...trip,
+        reservationId: resId,
+        expiresAt: resData?.expires_at,
+        paymentBreakdown: breakdown ?? undefined,
+      };
       setIsWaiting(false);
       reservedTripRef.current = snapshot;
       setReservedTrip(snapshot);
@@ -746,8 +834,16 @@ export default function FindRideScreen({ navigation }) {
           pickupStop ?? fromPlace,
         ).catch(() => {});
       }
+
+      if (PAYMENTS_ENABLED && breakdown) {
+        Alert.alert(
+          'Seat reserved',
+          `Payment received — GHS ${breakdown.totalGhs} total. Your mate will see your reservation.`,
+        );
+      }
     } finally {
       setReserving(false);
+      setPaymentPhase(null);
     }
   };
 
@@ -1072,6 +1168,15 @@ export default function FindRideScreen({ navigation }) {
       </ScrollView>
       ) : null}
 
+      {!isTrackingReserved && showRouteResults && PAYMENTS_ENABLED ? (
+        <View style={styles.paymentBanner}>
+          <Ionicons name="phone-portrait-outline" size={18} color={Theme.colors.passenger} />
+          <Text style={styles.paymentBannerText}>
+            Reserve with Paystack MoMo — seat fare + 8% + GHS 1 request fee
+          </Text>
+        </View>
+      ) : null}
+
       {!isTrackingReserved && showRouteResults ? (
       <PassengerProblemBanner
         phase={problemBannerPhase}
@@ -1184,7 +1289,7 @@ export default function FindRideScreen({ navigation }) {
               pressed && deviceId && !reserving && { opacity: 0.9 },
             ]}>
             <Text style={styles.chooseBarBtnText}>
-              {!deviceId ? 'Loading…' : PASSENGER.reserveCta}
+              {!deviceId ? 'Loading…' : reserveProgressLabel ?? PASSENGER.reserveCta}
             </Text>
             <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
           </Pressable>
@@ -1233,6 +1338,11 @@ export default function FindRideScreen({ navigation }) {
         }}
         reserving={reserving}
         reserveReady={!!deviceId}
+        reserveLabel={reserveProgressLabel}
+        paymentsEnabled={PAYMENTS_ENABLED}
+        paymentBreakdown={sheetPaymentBreakdown}
+        paymentEmail={paymentEmail}
+        onPaymentEmailChange={setPaymentEmail}
       />
 
       <RatingModal
@@ -1511,6 +1621,25 @@ const styles = StyleSheet.create({
 
   // List
   resultsPane:   { flex: 1 },
+  paymentBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: SCREEN_GUTTER,
+    marginBottom: 10,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: Theme.colors.passengerSoft,
+    borderWidth: 1,
+    borderColor: Theme.colors.passenger + '44',
+  },
+  paymentBannerText: {
+    flex: 1,
+    color: Theme.colors.textSub,
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
   list:          { flex: 1 },
   listContent:   { paddingHorizontal: SCREEN_GUTTER, paddingBottom: TAB_BAR_CLEARANCE },
   sectionHeader: { paddingVertical: 10 },

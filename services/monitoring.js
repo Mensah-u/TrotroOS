@@ -29,6 +29,11 @@ function log(level, ...args) {
   }
 }
 
+function isDevBuild() {
+  // eslint-disable-next-line no-undef
+  return typeof __DEV__ !== 'undefined' && __DEV__;
+}
+
 /** Call once at app startup (App.js). Safe when @sentry/react-native is not installed. */
 export function initMonitoring() {
   if (monitoringInitialized) return;
@@ -37,6 +42,11 @@ export function initMonitoring() {
   const dsn = SENTRY_DSN?.trim();
   if (!dsn) {
     log('event', 'monitoring_init_skipped', { reason: 'no_dsn' });
+    return;
+  }
+
+  if (isDevBuild()) {
+    log('event', 'monitoring_init_skipped', { reason: 'dev_build' });
     return;
   }
 
@@ -61,10 +71,13 @@ export function initMonitoring() {
   }
 }
 
-/** Wrap root App for native crash capture. No-op when DSN is unset. */
+/** Wrap root App for native crash capture. No-op when DSN is unset or in local dev. */
 export function wrapAppWithMonitoring(AppComponent) {
   if (!SENTRY_DSN?.trim()) return AppComponent;
+  if (isDevBuild()) return AppComponent;
+  initMonitoring();
   const sdk = loadSentry();
+  if (!sdk?.init && sdk !== false) return AppComponent;
   return typeof sdk?.wrap === 'function' ? sdk.wrap(AppComponent) : AppComponent;
 }
 

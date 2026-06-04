@@ -63,6 +63,29 @@ export function pesewasToGhsString(pesewas: number): string {
   return `${sign}${whole}.${frac}`;
 }
 
+/** Mate seat-invite: 8% of trip fare + GHS 1 (driver does not pay the passenger seat fare). */
+export function computeMateInviteBreakdown(tripFarePesewas: number): PaymentBreakdown & {
+  tripFarePesewas: number;
+  tripFareGhs: string;
+} {
+  const platformPesewas = Math.round((tripFarePesewas * PLATFORM_FEE_BPS) / 10_000);
+  const requestPesewas = REQUEST_FEE_PESEWAS;
+  const amountInPesewas = platformPesewas + requestPesewas;
+
+  return {
+    tripFarePesewas,
+    tripFareGhs: pesewasToGhsString(tripFarePesewas),
+    seatPesewas: tripFarePesewas,
+    platformPesewas,
+    requestPesewas,
+    amountInPesewas,
+    seatFareGhs: pesewasToGhsString(tripFarePesewas),
+    platformFeeGhs: pesewasToGhsString(platformPesewas),
+    requestFeeGhs: pesewasToGhsString(requestPesewas),
+    totalGhs: pesewasToGhsString(amountInPesewas),
+  };
+}
+
 export function generatePaystackReference(prefix = 'trotro'): string {
   const stamp = Date.now().toString(36);
   const rand = crypto.randomUUID().replace(/-/g, '').slice(0, 12);

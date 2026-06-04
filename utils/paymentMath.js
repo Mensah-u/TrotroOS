@@ -51,3 +51,30 @@ export function estimatePaymentTotal(seatFare) {
   if (!parsed.ok) return null;
   return computePaymentBreakdown(parsed.seatPesewas);
 }
+
+/**
+ * Mate seat-invite fee: platform 8% of trip fare + GHS 1 request fee (no seat charge).
+ * Mirrors computeMateInviteBreakdown in supabase/functions/_shared/paymentMath.ts
+ */
+export function computeMateInviteBreakdown(tripFarePesewas) {
+  const platformPesewas = Math.round((tripFarePesewas * PLATFORM_FEE_BPS) / 10_000);
+  const requestPesewas = REQUEST_FEE_PESEWAS;
+  const amountInPesewas = platformPesewas + requestPesewas;
+  return {
+    tripFarePesewas,
+    platformPesewas,
+    requestPesewas,
+    amountInPesewas,
+    tripFareGhs: pesewasToGhsString(tripFarePesewas),
+    platformFeeGhs: pesewasToGhsString(platformPesewas),
+    requestFeeGhs: pesewasToGhsString(requestPesewas),
+    totalGhs: pesewasToGhsString(amountInPesewas),
+  };
+}
+
+/** UI helper: mate invite MoMo total from trip fare in GHS. */
+export function estimateMateInviteFee(tripFare) {
+  const parsed = parseSeatFareInput(tripFare);
+  if (!parsed.ok) return null;
+  return computeMateInviteBreakdown(parsed.seatPesewas);
+}

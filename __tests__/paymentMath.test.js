@@ -1,6 +1,7 @@
 import {
   REQUEST_FEE_PESEWAS,
   PLATFORM_FEE_BPS,
+  computeMateInviteBreakdown,
   computePaymentBreakdown,
   parseSeatFareInput,
   pesewasToGhsString,
@@ -39,5 +40,14 @@ describe('paymentMath', () => {
     expect(pesewasToGhsString(1180)).toBe('11.80');
     expect(pesewasToGhsString(100)).toBe('1.00');
     expect(pesewasToGhsString(5)).toBe('0.05');
+  });
+
+  test('computeMateInviteBreakdown: 4 GHS fare → 1.32 GHS invite fee', () => {
+    const b = computeMateInviteBreakdown(400);
+    expect(b.tripFareGhs).toBe('4.00');
+    expect(b.platformFeeGhs).toBe('0.32');
+    expect(b.requestFeeGhs).toBe('1.00');
+    expect(b.totalGhs).toBe('1.32');
+    expect(b.amountInPesewas).toBe(132);
   });
 });
